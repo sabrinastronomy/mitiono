@@ -1,0 +1,181 @@
+import numpy as np
+import bmxdata
+#import mkfftw
+import scipy
+import time
+from scipy import fft
+from matplotlib import pyplot as plt
+import numba as nb
+plt.ion()
+
+
+def xcorr_pieces_old(v1,v2,nchunk):
+    n=len(v1)//nchunk
+    print(n)    
+    x1=np.zeros(n*2)
+    x2=np.zeros(n*2)
+    tot=0
+    for i in range(nchunk):
+        print(i)
+        x1[:n]=v1[i*n:(i+1)*n]
+        x2[:n]=v2[i*n:(i+1)*n]
+        if False:
+            x1ft=np.fft.rfft(x1)
+            x2ft=np.fft.rfft(x2)
+            tot=tot+np.fft.irfft(x1ft*np.conj(x2ft))
+        else:
+            x1ft=mkfftw.rfftn(x1)
+            x2ft=mkfftw.rfftn(x2)
+            tot=tot+mkfftw.irfftn(x1ft*np.conj(x2ft))
+    return tot
+
+
+
+@nb.njit(parallel=True)
+def copy_line(tmp,vec,n,off,k):
+    for i in nb.prange(n):
+        tmp[k,i]=vec[i+off]
+
+def xcorr_blocks(v1,v2,nchunk,nn=8):
+    n=len(v1)//nchunk
+    tmp1=np.zeros([nn,n*2],dtype='float32')
+    tmp2=np.zeros([nn,n*2],dtype='float32')
+    tot=0
+    nrep=nchunk//nn
+    ll=n*nn
+    for i in range(nrep):
+        #print('copying')
+        if True:
+            for k in range(nn):
+                copy_line(tmp1,v1,n,i*ll+k*n,k)
+                copy_line(tmp2,v2,n,i*ll+k*n,k)
+        else:
+            tmp1[:,:n]=np.reshape(v1[i*ll:(i+1)*ll],[nn,n])
+            tmp2[:,:n]=np.reshape(v2[i*ll:(i+1)*ll],[nn,n])
+        #print('ffts')
+        if False:
+            tmp1ft=mkfftw.fft_r2c(tmp1)
+            tmp2ft=mkfftw.fft_r2c(tmp2)
+            mycorr=mkfftw.fft_c2r(tmp1ft*np.conj(tmp2ft))
+        else:
+            with fft.set_workers(nn):
+                tmp1ft=fft.rfft(tmp1,axis=1)
+            with fft.set_workers(nn):
+                tmp2ft=fft.rfft(tmp2,axis=1)
+            with fft.set_workers(nn):
+                mycorr=fft.irfft(tmp1ft*np.conj(tmp2ft))
+        #print('summing')
+        tot=tot+np.sum(mycorr,axis=0)
+    return tot
+    
+
+def xcorr_pieces(v1,v2_in,nchunk):
+    n=len(v1)//nchunk
+    print(n)    
+    x1=np.zeros(n*2)
+    x2=np.zeros(n*2)
+    tot=0
+    v2=np.empty(len(v2_in)+n,dtype=v2_in.dtype)
+    v2[:n//2]=v2_in[-n//2:]
+    v2[-n//2:]=v2_in[:n//2]
+    v2[n//2:-n//2]=v2_in
+
+    for i in range(2):
+        print(i)
+        x1[n//2:(3*n//2)]=v1[i*n:(i+1)*n]
+        x2[:]=v2[i*n:(i+2)*n]
+        if False:
+            x1ft=np.fft.rfft(x1)
+            x2ft=np.fft.rfft(x2)
+            tot=tot+np.fft.irfft(x1ft*np.conj(x2ft))
+        else:
+            x1ft=mkfftw.rfftn(x1)
+            x2ft=mkfftw.rfftn(x2)
+            tot=tot+mkfftw.irfftn(x1ft*np.conj(x2ft))
+    return tot
+
+
+
+#--------------------------------------------------------------------------------
+
+try:
+    print('len(d1) is ',len(d1))
+except:
+    dat=bmxdata.BMXRingbuffer('201107_024900_D1.ring');tag1='D1';
+    #dat=bmxdata.BMXRingbuffer('201107_024900_D2.ring');tag1='D2';
+    #d1=dat.datad0c1;tag1=tag1+'d0';
+    d1=dat.datad1c1;tag1=tag1+'d1';
+
+    #dat=bmxdata.BMXRingbuffer('201107_024900_D1.ring');tag2='D1';
+    dat=bmxdata.BMXRingbuffer('201107_024900_D2.ring');tag2='D2';
+    d2=dat.datad1c1;tag2=tag2+'d1';
+    #d2=dat.datad0c1;tag2=tag2+'d0';
+    del(dat)
+
+    #d1=d1[:len(d1)//8]
+    #d2=d2[:len(d2)//8]
+
+    #d1=d1[len(d1)//2:]
+    #d2=d2[len(d2)//2:]
+
+
+
+n=len(d1)
+t1=time.time()
+mycorr=xcorr_blocks(d1[:n//2],d2[:n//2],128//8)
+mycorr2=xcorr_blocks(d1[n//2:],d2[n//2:],128//8)
+t2=time.time()
+print('took ',t2-t1,' to do xcorr')
+
+
+freqs=fft.fftfreq(len(mycorr))
+wts=0.5-np.abs(freqs)
+freqs=freqs/freqs[1]
+
+corr_norm=mycorr/wts
+corr_norm=np.fft.fftshift(corr_norm)
+nn=len(corr_norm)//4
+corr_norm=corr_norm[nn:-nn]
+ff=np.arange(-len(corr_norm)//2,len(corr_norm)//2)
+
+corr_norm2=mycorr2/wts
+corr_norm2=np.fft.fftshift(corr_norm2)
+corr_norm2=corr_norm2[nn:-nn]
+
+
+title='201107_024900 '+ tag1 +' x ' + tag2
+froot='201107_024900_'+tag1+'x'+tag2
+plt.clf();
+plt.plot(ff,corr_norm)
+plt.plot(ff,corr_norm2)
+plt.title(title)
+plt.savefig(froot+'_full.png')
+ind=np.argmax(np.abs(corr_norm))
+myoff=ff[ind]
+lims=plt.axis()
+plt.axis([myoff-1e6,myoff+1e6,lims[2],lims[3]])
+
+
+plt.savefig(froot+'.png')
+plt.axis([myoff-1e3,myoff+1e3,lims[2],lims[3]])
+plt.savefig(froot+'_zoom1.png')
+plt.axis([myoff-1e2,myoff+1e2,lims[2],lims[3]])
+plt.savefig(froot+'_zoom2.png')
+
+assert(1==0)
+
+tot=xcorr_pieces(d1,d2,32)
+
+
+
+if False:
+    d1ft=mkfftw.rfftn(d1)
+    d2ft=mkfft2.rfftn(d2)
+    xcorr=mkfftw.irfftn(d1ft*np.conj(d2ft))
+else:
+    t1=time.time()
+    d1ft=fft.rfft(d1)
+    d2ft=fft.rfft(d2)
+    xcorr=fft.irfft(d1ft*np.conj(d2ft))
+    t2=time.time()
+    print('run time was ',t2-t1)
