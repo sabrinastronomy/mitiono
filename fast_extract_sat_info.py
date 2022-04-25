@@ -103,8 +103,10 @@ class GetIonoMap:
             times_str[i] = self.weeksecondstoutc(gpsweek=WNc, gpsseconds=times_GPS[i])
         return times_str
 
-    def plot_process(self, WNc):
+    def plot_process(self, WNc, plot_name, TEC=False, no_negative_stec=True):
         """
+        :param WNc - week number count (GNSS time thing)
+        :param TEC - whether to plot sTEC or TEC, not sure if this is working
         Plot satellites sTECs versus time.
         """
         num_curr = 0
@@ -114,23 +116,28 @@ class GetIonoMap:
                 continue
 
             num_curr += 1
-
             stecs = np.concatenate(self.all_sat_dict[key]["tec"]).ravel()
-            stecs = np.mean(stecs.reshape(-1, 100), axis=1) # use this to average every 100 elements
+            times = np.concatenate(self.all_sat_dict[key]["times"]).ravel()
 
-            # if min(stecs) > 0:
-            #     continue
-            # if num_curr > 10:
-            #     break
+            if min(stecs) < 0 and no_negative_stec:
+                continue
+            stec_length = len(stecs)
+            if stec_length > 1e8:
+                mod_stecs = stec_length % 100
+                stecs = stecs[:mod_stecs*100]
+                stecs = np.mean(stecs.reshape(-1, 100), axis=1) # use this to average every 100 elements
+
+                times = times[:mod_stecs*100]
+                times = np.mean(times.reshape(-1, 100), axis=1) # use this to average every 100 elements
+
+            times_str = self.convert_GPStime_wrapper(times, WNc)
 
             elevation = np.concatenate(self.all_sat_dict[key]["elev_approx"]).ravel()
             time_elevation = np.concatenate(self.all_sat_dict[key]["elev_time_approx"]).ravel()/1000 # times reported in 0.001s for SatVis files for some reason ugh
             times_elev_str = self.convert_GPStime_wrapper(time_elevation, WNc)
-            times = np.concatenate(self.all_sat_dict[key]["times"]).ravel()
-            times_str = self.convert_GPStime_wrapper(times, WNc)
 
             # interpolate elevations
-            # make function (func_intermediate)
+            # make function (func_intermediate), TODO below interpolation of elevations may not be working correctly
 
             func_intermediate, min_time, max_time = self.create_time2elevation_func(times_elev_str, elevation)
             new_elevations = np.empty(len(times))
@@ -142,20 +149,26 @@ class GetIonoMap:
                 else:
                     new_elevations[k] = None
 
-            tecs = stecs * np.sin(np.deg2rad(new_elevations))
             plt_dates = dates.datestr2num(times_str)
             plt.xticks(rotation=90)
             print(f"plotting {num_curr}")
 
-            plt.scatter(plt_dates, stecs, alpha=1, s=1, label=key)
+            if TEC:
+                tecs = stecs * np.sin(np.deg2rad(new_elevations))
+                plt.scatter(plt_dates, tecs, alpha=1, s=1, label=key)
+
+            else:
+                plt.scatter(plt_dates, stecs, alpha=1, s=1, label=key)
             plt.gca().xaxis.set_major_formatter(dates.DateFormatter('%m-%d %H:%M'))
             plt.gca().xaxis.set_major_locator(dates.HourLocator(interval=5))
 
-        plt.ylabel("sTEC [TECu]")
+        if TEC:
+            plt.ylabel("TEC [TECu]")
+        else:
+            plt.ylabel("sTEC [TECu]")
         plt.tight_layout()
-        # plt.colorbar(cmap="viridis_r")
-        # plt.legend(ncol=10, prop={'size': 3})
-        plt.savefig(f"../plots/TECS_C41_{self.min_elev}.png", dpi=300)
+        plt.legend(ncol=10, prop={'size': 3})
+        plt.savefig(f"../plots/{plot_name}_{self.min_elev}.png", dpi=300)
         plt.close()
 
     def extract_tec_elev_times_sat_id(self):
