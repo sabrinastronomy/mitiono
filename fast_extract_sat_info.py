@@ -1,12 +1,27 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import interpolate
 import datetime
-import datetime
-import matplotlib.dates as md
+import matplotlib.dates as dates
 
 
 class GetIonoMap:
+    """
+    This class takes in a data directory and parses the file for TEC, elevations, times, satellite IDs. It also has
+    plotting capabilities/
+    """
     def __init__(self, data_direc, filename_sats_pr='', filename_sats_alts='', dict_name="satellite_dict", min_elev=0, process=False, plot=False, include_elev=False):
+        """
+        :param data_direc - directory with receiver raw files
+        :param filename_sats_pr - file containing pseudorange data
+        :param filename_sats_alts -  file containing elevation/altitude data
+        :param dict_name - dictionary name to save parsed data to
+        :param min_elev - minimum elevation of included satellites
+        :param process - whether or not to parse data
+        :param plot - whether or not to plot data
+        :param include_elev - whether or not to extract elevations
+        """
+
         self.all_sat_dict = {}
         self.filename_sats_pr, self.filename_sats_alts = data_direc + filename_sats_pr, data_direc + filename_sats_alts
         self.min_elev = min_elev
@@ -21,60 +36,126 @@ class GetIonoMap:
         self.elev = np.full(int(19e6), -1.)  # allocating numpy array for elevations
         self.j = 0
         self.elev_j = 0
-        if process:
+        if process: # process file to extract data
             self.extract_tec_elev_times_sat_id()
             self.convert_to_dict()
-        if plot:
+        if plot: # plot data
             self.plot_process()
 
+    def create_time2elevation_func(self, time, elevations):
+        """
+        This function returns a function that takes in an input time (in the following form: "%Y-%m-%d %H:%M:%S")
+        and outputs an elevation. Time range will be limited between min and max of interpolated times.
+        TODO: Make sure this is working correctly
+        :param elevations - to be interpolated elevations
+        :param times - corresponding times to be independent variable in interpolation
+        :return func_intermediate (function that takes in input time and outputs corresponding time,
+        origin is minimum time for this sat)
+        min_time,
+        min_time
+        """
+        form = "%Y-%m-%d %H:%M:%S"
+        min_time = datetime.datetime.strptime(time[0], form)
+        max_time = datetime.datetime.strptime(time[-1], form)
+        new_time_deltas = np.empty(len(time))
+        for i, t in enumerate(time):
+            t = datetime.datetime.strptime(t, form)
+            new_time_deltas[i] = (t - min_time).seconds # origin is first time
+        u, inds = np.unique(new_time_deltas, return_index=True) # getting unique time indices
+        new_time_deltas = new_time_deltas[inds]
+        elevations = elevations[inds]
+        func_intermediate = interpolate.interp1d(new_time_deltas, elevations, kind='linear', bounds_error=False)
+        return func_intermediate, min_time, max_time
+
+
+    def time2elevation_func(self, time_formatted, func_intermediate, min_time, max_time):
+        """
+        Function to get elevation at time (interpolated).
+        """
+        form = "%Y-%m-%d %H:%M:%S"
+        time_formatted = datetime.datetime.strptime(time_formatted, form)
+        tolerance = datetime.timedelta(minutes=10)
+        assert time_formatted > (min_time - tolerance)
+        assert time_formatted < (max_time + tolerance)
+
+        curr_time_secs_from_min = (time_formatted - min_time).seconds
+        elev_curr_time = func_intermediate(curr_time_secs_from_min)
+        return elev_curr_time
+
     def reset_initial_time(self):
+        """
+        Reset time offset
+        """
         self.begin_time_arr = 0
 
     def update_files(self, data_direc, filename_sats_pr, filename_sats_alts):
+        """
+        Update files such that you can continue to parse and add to dictionary.
+        """
         self.filename_sats_pr, self.filename_sats_alts = data_direc + filename_sats_pr, data_direc + filename_sats_alts
 
-    def plot_process(self, WNc):
-        i = 0
-        print(f"total number of satellites: {len(self.all_sat_dict)}")
-        for key in self.all_sat_dict.keys():
-            print(f"elevations {self.all_sat_dict[key]['elev_approx']}")
-            i += 1
+    def convert_GPStime_wrapper(self, times_GPS, WNc):
+        """
+        Convert list of GPS times to a list of strings given a WNc (Week number counter)
+        """
+        times_str = np.empty(len(times_GPS), dtype=object)
+        for i in range(len(times_GPS)):
+            times_str[i] = self.weeksecondstoutc(gpsweek=WNc, gpsseconds=times_GPS[i])
+        return times_str
 
-            tecs = np.concatenate(self.all_sat_dict[key]["tec"]).ravel()
-            tecs = tecs[::100]
-            if min(tecs) < 0:
+    def plot_process(self, WNc):
+        """
+        Plot satellites sTECs versus time.
+        """
+        num_curr = 0
+        print(f"total number of satellites: {len(self.all_sat_dict.keys())}")
+        for key in self.all_sat_dict.keys():
+            if key == None:
                 continue
 
+            num_curr += 1
+
+            stecs = np.concatenate(self.all_sat_dict[key]["tec"]).ravel()
+            stecs = np.mean(stecs.reshape(-1, 100), axis=1) # use this to average every 100 elements
+
+            # if min(stecs) > 0:
+            #     continue
+            # if num_curr > 10:
+            #     break
+
+            elevation = np.concatenate(self.all_sat_dict[key]["elev_approx"]).ravel()
+            time_elevation = np.concatenate(self.all_sat_dict[key]["elev_time_approx"]).ravel()/1000 # times reported in 0.001s for SatVis files for some reason ugh
+            times_elev_str = self.convert_GPStime_wrapper(time_elevation, WNc)
             times = np.concatenate(self.all_sat_dict[key]["times"]).ravel()
-            times = times[::100]
+            times_str = self.convert_GPStime_wrapper(times, WNc)
 
-            times_str = np.empty(len(times), dtype=object)
-            for i in range(len(times)):
-                # print(f"times[i] {times[i]}")
-                times_str[i] = self.weeksecondstoutc(gpsweek=WNc, gpsseconds=times[i])
+            # interpolate elevations
+            # make function (func_intermediate)
 
-            # xfmt = md.DateFormatter('%H:%M')
-            # ax = plt.gca()
-            plt.xticks(rotation=90)
-            # ax.xaxis.set_major_formatter(xfmt)
-            print(f"plotting {i}")
-            print(times_str)
-            import matplotlib.dates as dates
+            func_intermediate, min_time, max_time = self.create_time2elevation_func(times_elev_str, elevation)
+            new_elevations = np.empty(len(times))
+            for k, tim in enumerate(times_str):
+                form = "%Y-%m-%d %H:%M:%S"
+                t_test = datetime.datetime.strptime(tim, form)
+                if t_test > min_time and t_test < max_time:
+                    new_elevations[k] = self.time2elevation_func(tim, func_intermediate, min_time, max_time)
+                else:
+                    new_elevations[k] = None
 
+            tecs = stecs * np.sin(np.deg2rad(new_elevations))
             plt_dates = dates.datestr2num(times_str)
-            plt.scatter(plt_dates, tecs, label=key, alpha=0.5)
-            plt.gca().xaxis.set_major_formatter(md.DateFormatter('%m-%d %H:%M'))
-            plt.gca().xaxis.set_major_locator(md.HourLocator(interval=5))
-            # plt.setp(plt.gca().get_xticklabels(), rotation=60, ha="right")
+            plt.xticks(rotation=90)
+            print(f"plotting {num_curr}")
 
-        plt.tight_layout()
-        # plt.xlabel("time of day [hours]")
+            plt.scatter(plt_dates, stecs, alpha=1, s=1, label=key)
+            plt.gca().xaxis.set_major_formatter(dates.DateFormatter('%m-%d %H:%M'))
+            plt.gca().xaxis.set_major_locator(dates.HourLocator(interval=5))
+
         plt.ylabel("sTEC [TECu]")
-        plt.legend()
-        print("if paused below here, showing figure is taking forever.")
-        plt.show()
-        print("if paused below here, saving figure is taking forever.")
-        plt.savefig(f"stecs_time_elev_min_{self.min_elev}.png")
+        plt.tight_layout()
+        # plt.colorbar(cmap="viridis_r")
+        # plt.legend(ncol=10, prop={'size': 3})
+        plt.savefig(f"../plots/TECS_C41_{self.min_elev}.png", dpi=300)
         plt.close()
 
     def extract_tec_elev_times_sat_id(self):
@@ -104,12 +185,11 @@ class GetIonoMap:
                 self.j += 1
             i += 1
 
-    def convert_to_dict(self):
+    def convert_save_to_dict(self):
         """
         This method converts all the TEC, elevation, sat_id, and times array into a dictionary where each key is a
         satellite and the value is a dictionary containing properties of that satellite.
         """
-
         # Below get dictionary with dictionary (id_dict_pr) containing sat_ids and corresponding numeric values
         # and array of ids in numeric version (id_vec_numeric_sat)
         id_dict_pr, id_vec_pr_numeric_sat = self.helper_convert_int_keys(self.new_sat_id)
@@ -127,36 +207,47 @@ class GetIonoMap:
                 targ_elev = id_dict_elev[key]  # pick out a satellite
                 mask_elev = id_vec_elev_numeric_sat == targ_elev
                 curr_elev = self.elev[mask_elev]
-                elev_approx = curr_elev[0]
+                time_elev = self.elev_new_times[mask_elev]
+                elev_approx = curr_elev
             else:
                 elev_approx = 100 # random elev so it will enter if statement below when not including elevations
 
-            if elev_approx > self.min_elev:
+            if max(elev_approx) > self.min_elev:
                 if key not in self.all_sat_dict:
                     self.all_sat_dict[key] = {}
                     self.all_sat_dict[key]["tec"] = []
                     self.all_sat_dict[key]["times"] = []
                     if self.include_elev:
                         self.all_sat_dict[key]["elev_approx"] = []
-
+                        self.all_sat_dict[key]["elev_time_approx"] = []
                 curr_tec = self.tec[mask]
                 curr_new_times = self.new_times[mask]
                 self.all_sat_dict[key]["tec"].append(curr_tec)
                 self.all_sat_dict[key]["times"].append(curr_new_times)
                 if self.include_elev:
                     self.all_sat_dict[key]["elev_approx"].append(elev_approx)
+                    self.all_sat_dict[key]["elev_time_approx"].append(time_elev)
 
-        np.save("../data/{}.npy".format(self.dict_name), self.all_sat_dict)
+        np.save("{}.npy".format(self.dict_name), self.all_sat_dict)
         return
 
 
     def get_sat_dict(self):
+        """
+        Return current satellite dict for instance
+        """
         return self.all_sat_dict
 
     def replace_sat_dict(self, sat_dict):
+        """
+        Replace the satellite dictionary. Useful to do plotting on preprocessed data held in a .npy saved dictionary
+        """
         self.all_sat_dict = sat_dict
 
     def extract_pr_time(self, filename_pr):
+        """
+        Reads a pseudorange file (filenam_alt)
+        """
         with open(filename_pr, 'r', encoding="ISO-8859-1") as f:
             all_lines = f.readlines()
         f.close()
@@ -166,18 +257,19 @@ class GetIonoMap:
         all_times = np.empty(n)
         sat_id = [None]*n
         sig_type = [None]*n
-        # init_time = float(lines[0].split(',')[0])
         for i in range(n):
             tags = lines[i].split(',')
             pr[i] = float(tags[5])
             sat_id[i] = tags[2]
             sig_type[i] = tags[3]
             all_times[i] = float(tags[0])
-            # print(f"should be TOW: {all_times[i]}")
         return all_times, sig_type, sat_id, pr
 
     def extract_elev_time(self, filenam_alt):
-        # READS SATVISIBILITY1 FILE
+        """
+        Reads a SatVisibility1 file (filenam_alt)
+        """
+
         with open(filenam_alt, 'r', encoding="ISO-8859-1") as f:
             all_lines = f.readlines()
         f.close()
@@ -191,12 +283,11 @@ class GetIonoMap:
             self.elev_new_sat_id[self.elev_j] = tags[12]
             self.elev[self.elev_j] = tags[-3]
             self.elev_j += 1
-
         return
 
     @staticmethod
     def weeksecondstoutc(gpsweek, gpsseconds, leapseconds=0):
-        # random stack overflow post
+        # this is stolen from a random stack overflow post
         datetimeformat = "%Y-%m-%d %H:%M:%S"
         epoch = datetime.datetime.strptime("1980-01-06 00:00:00", datetimeformat)
         elapsed = datetime.timedelta(days=(gpsweek * 7), seconds=(gpsseconds - leapseconds))
@@ -206,7 +297,13 @@ class GetIonoMap:
 
     @staticmethod
     def helper_convert_int_keys(sat_id):
-        # ELEVS
+        """
+        Convert satellite IDs into numeric values stored in dictionary. Some of this written by Jon Sievers.
+        :param sat_id - satellite IDs
+
+        :return
+        id_dict - dictionary where keys are satellite names and values are their corresponding IDs
+        """
         ids = list(set(sat_id)) # get unique satellite values
         id_dict = {}
         for i, id in enumerate(ids): # create a dictionary where each value corresponds to an integer to represent a satellite
@@ -226,6 +323,14 @@ class GetIonoMap:
 
     @staticmethod
     def get_dTEC_first_order(delta_rho, signal_types=None):
+        """
+        Return a sTEC measurement from a given pseudorange difference (delta_rho)
+
+        :param delta_rho - difference in pseudoranges
+        :signal_types - types of signals we are using
+
+        :return sTEC measurement
+        """
         if signal_types is None:
             signal_types = []
         r_e = 2.8179e-15  # [m]
