@@ -64,7 +64,7 @@ class GetIonoMap:
         u, inds = np.unique(new_time_deltas, return_index=True) # getting unique time indices
         new_time_deltas = new_time_deltas[inds]
         elevations = elevations[inds]
-        func_intermediate = interpolate.interp1d(new_time_deltas, elevations, kind='linear', bounds_error=False)
+        # func_intermediate = interpolate.interp1d(new_time_deltas, elevations, kind='linear', bounds_error=False)
         return func_intermediate, min_time, max_time
 
 
@@ -103,7 +103,7 @@ class GetIonoMap:
             times_str[i] = self.weeksecondstoutc(gpsweek=WNc, gpsseconds=times_GPS[i])
         return times_str
 
-    def plot_process(self, WNc, plot_name, TEC=False, no_negative_stec=True):
+    def plot_process(self, WNc, plot_name, TEC=True, no_negative_stec=True):
         """
         :param WNc - week number count (GNSS time thing)
         :param TEC - whether to plot sTEC or TEC, not sure if this is working
@@ -111,24 +111,25 @@ class GetIonoMap:
         """
         num_curr = 0
         print(f"total number of satellites: {len(self.all_sat_dict.keys())}")
-        for key in self.all_sat_dict.keys():
+        for key in ["C46"]:
             if key == None:
                 continue
 
             num_curr += 1
             stecs = np.concatenate(self.all_sat_dict[key]["tec"]).ravel()
             times = np.concatenate(self.all_sat_dict[key]["times"]).ravel()
-
-            if min(stecs) < 0 and no_negative_stec:
-                continue
             stec_length = len(stecs)
+
             if stec_length > 1e8:
                 mod_stecs = stec_length % 100
                 stecs = stecs[:mod_stecs*100]
-                stecs = np.mean(stecs.reshape(-1, 100), axis=1) # use this to average every 100 elements
+                stecs = np.max(stecs.reshape(-1, 100), axis=1) # use this to average every 100 elements
 
                 times = times[:mod_stecs*100]
-                times = np.mean(times.reshape(-1, 100), axis=1) # use this to average every 100 elements
+                times = np.max(times.reshape(-1, 100), axis=1) # use this to average every 100 elements
+
+            if min(stecs) < 0 and no_negative_stec:
+                continue
 
             times_str = self.convert_GPStime_wrapper(times, WNc)
 
@@ -154,8 +155,11 @@ class GetIonoMap:
             print(f"plotting {num_curr}")
 
             if TEC:
-                tecs = stecs * np.sin(np.deg2rad(new_elevations))
-                plt.scatter(plt_dates, tecs, alpha=1, s=1, label=key)
+                print(new_elevations)
+                tecs = stecs * 1/np.cos(np.deg2rad(90-new_elevations))
+                plt.scatter(plt_dates, tecs, alpha=0.5, s=1, label=key + " TEC")
+                plt.scatter(plt_dates, stecs, alpha=0.5, s=1, label=key + " sTEC")
+                # plt.xlim(plt_dates[1000])
 
             else:
                 plt.scatter(plt_dates, stecs, alpha=1, s=1, label=key)
@@ -167,7 +171,8 @@ class GetIonoMap:
         else:
             plt.ylabel("sTEC [TECu]")
         plt.tight_layout()
-        plt.legend(ncol=10, prop={'size': 3})
+        plt.legend(prop={'size': 6})
+        # plt.legend(ncol=10, prop={'size': 3})
         plt.savefig(f"../plots/{plot_name}_{self.min_elev}.png", dpi=300)
         plt.close()
 
