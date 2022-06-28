@@ -1,11 +1,12 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy import interpolate
+from extract_sbf_data import ExtractSBF
 import datetime
 import matplotlib.dates as dates
 
+# IN PROGRESS
 
-class GetIonoMap:
+class GetIonoMap(ExtractSBF):
     """
     This class takes in a data directory and parses the file for TEC, elevations, times, satellite IDs. It also has
     plotting capabilities/
