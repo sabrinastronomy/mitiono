@@ -13,7 +13,7 @@ import os
 
 class ExtractSBF:
     """
-    This class takes in a data directory and parses the file for all required information necessary for ionospheric
+    This class takes in a data directories and parses the file for all required information necessary for ionospheric
     mapping (GetIonoMap class) and beam mapping (GetBeamMap class).
     """
     def __init__(self, data_direcs, min_elev=0, process=True, include_elev=True):

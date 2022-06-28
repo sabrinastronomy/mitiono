@@ -10,6 +10,9 @@ import matplotlib.pyplot as plt
 
 
 class GetBeamMap(ExtractSBF):
+    """
+    This class takes in data directories and created a beam map.
+    """
     def __init__(self, data_direcs):
         super().__init__(data_direcs=data_direcs, include_elev=True, process=True)
 
