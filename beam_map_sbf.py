@@ -20,7 +20,10 @@ class GetBeamMap(ExtractSBF):
         print(self.all_sat_dict)
         return
 
-    def make_plot(self, all_sat, plot_title, sat_list=[], direc="/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/mitiono_scripts/plots/", filename="all_sat.png"):
+    def replace_dictionary(self, dict):
+        self.all_sat_dict = dict
+
+    def make_plot(self, all_sat, plot_title, sat_list=[], direc="/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/plots/", filename="all_sat.png"):
         """
         Plot all the satellites or a subset
         param: all_sat - boolean when true all satellites are plotted, when false, looks for satellite in sat_list
@@ -40,7 +43,7 @@ class GetBeamMap(ExtractSBF):
             elevs = satellite["elevations"][0]
             az = satellite["azimuths"][0]
             cnos = satellite["cno"][0]
-            cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+            times_elevs, cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
             power = self.convert_P(cnos)  # dBw
 
             # difference_array = np.absolute(elevs - 81.41)
@@ -51,6 +54,7 @@ class GetBeamMap(ExtractSBF):
             normalized_power = power - max_cno
             plt.scatter(az, elevs, c=normalized_power)
 
+        plt.scatter(180, 81.41, s=10)
         plt.xlabel("Azimuth [deg]")
         plt.ylabel("Elevation [deg]")
         plt.colorbar(label="Power [dBW]")
@@ -76,10 +80,11 @@ class GetBeamMap(ExtractSBF):
         elev_indices = indices[1]
         cnos_indices = indices[2]
 
+        times_elevs = times_elevs[elev_indices]
         elevs = elevs[elev_indices]
         az = az[elev_indices]
         cnos = cnos[cnos_indices]
-        return cnos, elevs, az
+        return times_elevs, cnos, elevs, az
 
 #### Sample code to grab parsed dictionary file ######
 # directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/mitiono_scripts/parsed_data/"]
@@ -87,6 +92,6 @@ class GetBeamMap(ExtractSBF):
 #####
 
 if __name__ == "__main__":
-    directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/D3A(6)_Data/June14_port_C2_GNSS/"]
+    directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/D3A(6)_Data/June16_port_C2_GNSS_part2/"]
     beam_map_14 = GetBeamMap(data_direcs=directories)
     beam_map_14.make_plot(all_sat=True, plot_title="All Satellite Beam Plot")

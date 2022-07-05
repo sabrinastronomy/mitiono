@@ -87,14 +87,7 @@ class ExtractSBF:
         self.extract_satvisibility_file()
         print(f"Updated instance to include {self.filename_sats_pr} and {self.filename_sats_elevs}.")
 
-    def convert_GPStime_wrapper(self, times_GPS, Wnc):
-        """
-        Convert list of GPS times to a list of strings given a WNc (Week number counter)
-        """
-        times_str = np.empty(len(times_GPS), dtype=object)
-        for i in range(len(times_GPS)):
-            times_str[i] = self.weeksecondstoutc(gpsweek=Wnc[i], gpsseconds=times_GPS[i])
-        return times_str
+
 
 
     def convert_save_to_dict_all(self):
@@ -229,6 +222,16 @@ class ExtractSBF:
         utc_time = datetime.datetime.strftime(epoch + elapsed, datetimeformat)
         # print(f"converted utc_time {utc_time}")
         return utc_time
+
+    @staticmethod
+    def convert_GPStime_wrapper(times_GPS, Wnc):
+        """
+        Convert list of GPS times to a list of UTC times given a WNc (Week number counter)
+        """
+        times_str = np.empty(len(times_GPS), dtype=object)
+        for i in range(len(times_GPS)):
+            times_str[i] = ExtractSBF.weeksecondstoutc(gpsweek=Wnc[i], gpsseconds=times_GPS[i])
+        return times_str
 
     @staticmethod
     def helper_convert_int_keys(sat_id):
