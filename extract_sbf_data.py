@@ -25,13 +25,31 @@ class ExtractSBF:
         :param min_elev - minimum elevation of included satellites
         """
         self.data_direcs = data_direcs
-        self.all_sat_dict = {}
         self.min_elev = min_elev
         self.include_elev = include_elev
 
+        ## Set params
+        ##########################################
+        self.reset_params()
+        ##########################################
+
+        if process:
+            self.parse_data_direcs() # actually does the extraction
+
+    def reset_params(self):
+        self.all_sat_dict = {}
         ### Keeping track of where we are in huge list
         self.j = 0
         self.elev_j = 0
+
+        ### Variables to be extracted from Measurement Files ###
+
+        self.pr = np.full(int(19e6), -1.)
+        self.all_times = np.full(int(19e6), -1.)
+        self.wnc = np.full(int(19e6), -1.)
+        self.c_n_0 = np.full(int(19e6), -1.)
+        self.sat_id = np.empty(int(19e6), dtype=object)
+        self.sig_type = np.empty(int(19e6), dtype=object)
 
         ### Variables to be from SatVisibility Files ###
         self.az = np.full(int(19e6), -1.)
@@ -39,24 +57,11 @@ class ExtractSBF:
         self.elev_new_times_WNC = np.full(int(19e6), -1.)
         self.elev = np.full(int(19e6), -1.)  # allocating numpy array for elevations
         self.elev_new_sat_id = np.empty(int(19e6), dtype=object)  # allocating numpy array for satellite name values
-        ##########################################
-
-        ### Variables to be extracted from Measurement Files ###
-        self.pr = np.full(int(19e6), -1.)
-        self.all_times = np.full(int(19e6), -1.)
-        self.wnc = np.full(int(19e6), -1.)
-        self.c_n_0 = np.full(int(19e6), -1.)
-        self.sat_id = np.empty(int(19e6), dtype=object)
-        self.sig_type = np.empty(int(19e6), dtype=object)
-        ##########################################
-
-        if process:
-            self.parse_data_direcs() # actually does the extraction
-
 
     def parse_data_direcs(self, convert_to_dict=True):
         ### grab all measurement and SatVisibility files from data_direcs inputted ###
         for direc in self.data_direcs:
+            self.reset_params()
             measures = []
             sat_vises = []
             for file in sorted(os.listdir(direc)):

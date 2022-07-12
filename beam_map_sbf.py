@@ -31,6 +31,9 @@ class GetBeamMap(ExtractSBF):
         param: direc - directory where to save the plot
         param: filename - name of plot you're making
         """
+        plt.close()
+        max_power = -200
+        min_power = 0
         if all_sat:
             sats_to_plot = self.all_sat_dict
         else:
@@ -45,22 +48,54 @@ class GetBeamMap(ExtractSBF):
             cnos = satellite["cno"][0]
             times_elevs, cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
             power = self.convert_P(cnos)  # dBw
+            # close_to_beam_bool = np.logical_and(elevs > 80, elevs < 82.5).any()
 
+
+            elev_beam = np.full(len(elevs), 81.41)
+            diff = np.abs(elevs - elev_beam)
+            print(diff)
+            elev_bool_tups = diff < 2
+
+
+            az_beam = np.full(len(az), 180)
+            diff = np.abs(az - az_beam)
+            az_bool_tups = diff < 2
+            bool_tups = np.logical_and(elev_bool_tups, az_bool_tups)
+
+            print(bool_tups.any())
+            # if not bool_tups.any():
+            #     continue
             # difference_array = np.absolute(elevs - 81.41)
             # TO DO add azimuthal dependence
             # index = difference_array.argmin()
+            if len(power) < 1:
+                continue
+            max_power_current = max(power)
+            if max_power_current > max_power:
+                max_power = max_power_current
 
-            max_cno = max(cnos)
-            normalized_power = power - max_cno
-            plt.scatter(az, elevs, c=normalized_power)
+            min_power_current = min(power)
+            if min_power_current < min_power:
+                min_power = min_power_current
 
-        plt.scatter(180, 81.41, s=10)
+            # normalized_power = power - max_cno
+            plt.scatter(az, elevs, c=power, cmap='inferno_r', label=key)
+
+        print(f"max_power {max_power}")
+        print(f"min_power {min_power}")
+
+        plt.colorbar(label="Power [dBW]")
+        plt.xlim(160, 190)
+        plt.ylim(70, 90)
+        plt.clim(-130, -180)
+        # plt.legend()
+        plt.scatter(180, 81.41, s=100, facecolors='none', edgecolors='y', lw=2, zorder=100)
         plt.xlabel("Azimuth [deg]")
         plt.ylabel("Elevation [deg]")
-        plt.colorbar(label="Power [dBW]")
         plt.title(plot_title)
 
         plt.savefig(direc + filename, dpi=400)
+        plt.close()
 
     @staticmethod
     def convert_P(C_N):
@@ -86,12 +121,20 @@ class GetBeamMap(ExtractSBF):
         cnos = cnos[cnos_indices]
         return times_elevs, cnos, elevs, az
 
-#### Sample code to grab parsed dictionary file ######
-# directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/mitiono_scripts/parsed_data/"]
-# sat_dict = np.load(directories[0] + "june14_satellite_dict_all.npy", allow_pickle=True).item()  # extracting saved dictionary
-#####
+
 
 if __name__ == "__main__":
-    directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/D3A(6)_Data/June16_port_C2_GNSS_part2/"]
-    beam_map_14 = GetBeamMap(data_direcs=directories)
-    beam_map_14.make_plot(all_sat=True, plot_title="All Satellite Beam Plot")
+    ## Sample code to grab parsed dictionary file ######
+    directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/parsed_data/"]
+    # days = ["June14_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_part2_satellite_dict_all"]
+    days = ["June_16_port_C2_GNSS_part2_satellite_dict_all"]
+    # days = []
+    a = []
+    for day in days:
+        sat_dict = np.load(directories[0] + day + ".npy", allow_pickle=True).item()  # extracting saved dictionary
+        beam_map = GetBeamMap(data_direcs=[])
+        beam_map.replace_dictionary(sat_dict)
+        beam_map.make_plot(all_sat=True, plot_title="Zoomed In Around Beam", filename="all_zoomed_" + day)
+
+    # directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/D3A(6)_Data/June14_port_C2_GNSS/", "/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/D3A(6)_Data/June_16_port_C2_GNSS/", "/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/D3A(6)_Data/June_16_port_C2_GNSS_part2/"]
+    # beam_map = GetBeamMap(data_direcs=directories)
