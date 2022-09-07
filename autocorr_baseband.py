@@ -80,4 +80,7 @@ def autocorrelate(data):
     plt.plot([0, 8000], [amp * fac, amp * fac])
     plt.title('GPS Autocorr Zoom')
     plt.legend(['autocorr', 'Peak amplitude', r'Peak-1$\sigma$'])
-    plt.savefig('gps_autocorr_zoom.png')
+    plt.savefig('./gps_autocorr_zoom.png')
+
+
+autocorrelate(d1)

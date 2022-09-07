@@ -1,10 +1,12 @@
 """
 This file extracts data from NMEA files returned by the receiver to generate a beam map. NMEA data does not
-generate elevations or S/N accurate enough for meaningful beam maps.
+generate elevations or S/N accurate enough for meaningful beam maps. However, this script is perserved for future
+reference or when needing to parse NMEA data.
 
 Written by Sabrina Berger
 Created in April, 2022
 """
+
 # below are the packages needed to run this script
 # you should be able to install most with pip, but
 # I recommend making a Conda virtual environment to place them in.

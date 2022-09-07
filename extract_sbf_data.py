@@ -16,7 +16,7 @@ class ExtractSBF:
     This class takes in a data directories and parses the file for all required information necessary for ionospheric
     mapping (GetIonoMap class) and beam mapping (GetBeamMap class).
     """
-    def __init__(self, data_direcs, min_elev=0, process=True, include_elev=True):
+    def __init__(self, data_direcs, min_elev=0, process=True, include_elev=True, mask_frequency="1"):
         """
         :param data_direc - directory with receiver raw files
         :param filename_sats_pr - file containing pseudorange data, i.e., measurements.txt file
@@ -27,6 +27,7 @@ class ExtractSBF:
         self.data_direcs = data_direcs
         self.min_elev = min_elev
         self.include_elev = include_elev
+        self.mask_frequency = mask_frequency
 
         ## Set params
         ##########################################
@@ -93,8 +94,6 @@ class ExtractSBF:
         print(f"Updated instance to include {self.filename_sats_pr} and {self.filename_sats_elevs}.")
 
 
-
-
     def convert_save_to_dict_all(self):
         """
         This method converts all the TEC, elevation, sat_id, and times array into a dictionary where each key is a
@@ -104,10 +103,8 @@ class ExtractSBF:
         # and array of ids in numeric version (id_vec_numeric_sat)
         id_dict_pr, id_vec_pr_numeric_sat = self.helper_convert_int_keys(self.sat_id)
         id_dict_elev, id_vec_elev_numeric_sat = self.helper_convert_int_keys(self.elev_new_sat_id)
-        print(id_dict_elev, id_vec_elev_numeric_sat)
-        print(id_dict_pr, id_vec_pr_numeric_sat)
+
         for num, key in enumerate(id_dict_pr):
-            print(key)
             # getting masks for pseudoranges
             targ_pr = id_dict_pr[key]  # pick out a satellite
             mask = id_vec_pr_numeric_sat == targ_pr # get numeric version to use ask mask
@@ -173,6 +170,7 @@ class ExtractSBF:
     def extract_measurements_file(self):
         """
         Reads a pseudorange file (filenam_alt)
+        mask_frequency: single frequency number as string
         """
         filename_pr = self.filename_sats_pr
         with open(filename_pr, 'r', encoding="ISO-8859-1") as f:
@@ -184,7 +182,7 @@ class ExtractSBF:
 
         for i in range(n):
             tags = lines[i].split(',')
-            if tags[5] == '' or tags[5] == 0.0:
+            if tags[5] == '' or tags[5] == 0.0 or self.mask_frequency not in tags[3]:
                 continue
             self.pr[self.j] = float(tags[5])
             self.sat_id[self.j] = tags[2]
@@ -193,7 +191,6 @@ class ExtractSBF:
             self.wnc[self.j] = float(tags[1])
             self.c_n_0[self.j] = float(tags[-2])
             self.j += 1
-            # print(self.j)
 
     def extract_satvisibility_file(self):
         """
@@ -271,7 +268,6 @@ class ExtractSBF:
         :param prn - pseudorandom number from a satellite
         :returns rinex satellite code needed to match with other parameters
         """
-
         prn = int(prn)
         if prn >= 1 and prn <= 37: # GPS
             if prn < 10:
