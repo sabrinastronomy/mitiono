@@ -5,18 +5,6 @@ Written by Sabrina Berger and Vincent MacKay
 """
 
 
-# import matplotlib.font_manager
-# from IPython.core.display import HTML
-# font = "Gill Sans MT"
-#
-# def make_html(fontname):
-#     return "<p>{font}: <span style='font-family:{font}; font-size: 24px;'>{font}</p>".format(font=fontname)
-#
-# code = "\n".join([make_html(font) for font in sorted(set([f.name for f in matplotlib.font_manager.fontManager.ttflist]))])
-#
-# # HTML("<div style='column-count: 2;'>{}</div>".format(code))
-
-
 from extract_sbf_data import ExtractSBF
 import numpy as np
 import matplotlib.pyplot as plt
@@ -240,8 +228,10 @@ class GetBeamMap(ExtractSBF):
         # In our case, I added those variables to the hist_single_sat() function,
         # so that we can easily change the orientation of the beam when
         # calling that function.
-        beams_folder = '/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/notebook_and_beams/new_beams/'
-        beam = CSTBeam(beams_folder, zenith_rot=zenith_rot, ns_rot=ns_rot, ew_rot=ew_rot)
+
+        beams_folder = '/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/notebook_and_beams/new_new_beams/'
+        beam = CSTBeam(beams_folder)
+        rotated_beam = beam.rotate(zenith_rot=D3A_ALT_deg, ns_rot=90-D3A_AZ_deg)
 
         # Now, let's solve problem (1).
         # We would have two options: converting the beam to azel,
@@ -276,9 +266,9 @@ class GetBeamMap(ExtractSBF):
         i_sat_theta_right = (right_sat_theta_deg // beam.theta_step).astype('int')
         i_sat_phi_right = (right_sat_phi_deg // beam.phi_step).astype('int')
         i_sat_right = (i_sat_phi_right, i_sat_theta_right)
-        # Then, the corresponding beam cut will be beam.beams_dir[i_pol,i_freq,i_sat_phi,i_sat_theta,:]
+        # Then, the corresponding beam cut will be beam.directivity[i_pol,i_freq,i_sat_phi,i_sat_theta,:]
 
-        # Plotting time!
+        # # Plotting time!
         fig, ax = plt.subplots(1, 1, figsize=[10, 8])
 
         # Plot the satellite
@@ -306,28 +296,28 @@ class GetBeamMap(ExtractSBF):
             'alpha': 1,
             'color': 'b'
         }
-        # max_beam_power = 10 * np.log10(
-        #     max(beam.beams_dir[i_pol, i_freq][i_sat_left].max(), beam.beams_dir[i_pol, i_freq][i_sat_right].max()))
-        # if norm_power:
-        #     ax.plot(left_angles_deg, 10 * np.log10(beam.beams_dir[i_pol, i_freq][i_sat_left]) - max_beam_power,
-        #             **line_props, label='Simulated beam at {:.3g} GHz'.format(beam.freqs[i_freq]))
-        #     ax.plot(right_angles_deg, 10 * np.log10(beam.beams_dir[i_pol, i_freq][i_sat_right]) - max_beam_power,
-        #             **line_props)
-        #
-        # else:
-        #     ax.plot(left_angles_deg, 10 * np.log10(beam.beams_dir[i_pol, i_freq][i_sat_left]) + dB_offset_sim,
-        #             **line_props, label='Simulated beam at {:.3g} GHz'.format(beam.freqs[i_freq]))
-        #     ax.plot(right_angles_deg, 10 * np.log10(beam.beams_dir[i_pol, i_freq][i_sat_right]) + dB_offset_sim,
-        #             **line_props)
+        max_beam_power = 10 * np.log10(
+            max(beam.directivity[i_pol, i_freq][i_sat_left].max(), beam.directivity[i_pol, i_freq][i_sat_right].max()))
+        if norm_power:
+            ax.plot(left_angles_deg, 10 * np.log10(beam.directivity[i_pol, i_freq][i_sat_left]) - max_beam_power,
+                    **line_props, label='Simulated beam at {:.3g} GHz'.format(beam.freqs[i_freq]))
+            ax.plot(right_angles_deg, 10 * np.log10(beam.directivity[i_pol, i_freq][i_sat_right]) - max_beam_power,
+                    **line_props)
+
+        else:
+            ax.plot(left_angles_deg, 10 * np.log10(beam.directivity[i_pol, i_freq][i_sat_left]) + dB_offset_sim,
+                    **line_props, label='Simulated beam at {:.3g} GHz'.format(beam.freqs[i_freq]))
+            ax.plot(right_angles_deg, 10 * np.log10(beam.directivity[i_pol, i_freq][i_sat_right]) + dB_offset_sim,
+                    **line_props)
 
         ax.set_xlim([-20, 20])
-
+        print(beam.freqs)
         ax.set_xlabel(r"$\theta$, the angle from beam center [deg]")
         ax.set_ylabel("Log Power [uncalibrated]")
         ax.set_title(f"Galileo Satellte: {sat_name}")
         ax.legend(loc='lower center')
-        print("Saving single satellite plot at " + "/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/plots/sim_beam_{:.3g}.png".format(beam.freqs[i_freq]))
-        fig.savefig(f"../plots/sim_beam_{beam.freqs[i_freq]}_{sat_name}.png", dpi=300, bbox_inches='tight')
+        print("Saving single satellite plot at " + f"/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/plots/zr_0/sim_beam_{beam.freqs[i_freq]}_{sat_name}.png".format(beam.freqs[i_freq]))
+        fig.savefig(f"../plots/zr_0/sim_beam_{beam.freqs[i_freq]}_{sat_name}.png", dpi=300, bbox_inches='tight')
 
     @staticmethod
     def convert_az_el_to_beam_theta_phi(az, el, pitch_offset, roll_offset):
@@ -419,7 +409,6 @@ if __name__ == "__main__":
     new_days = []
     for i, day in enumerate(days):
         new_days.append(direc + day + "/")
-    # beam_map = GetBeamMap(data_direcs=new_days)
 
 
     directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/parsed_data/"]
@@ -433,30 +422,28 @@ if __name__ == "__main__":
         beam_map = GetBeamMap(data_direcs=[])
         beam_map.replace_dictionary(sat_dict)
         beam_map.make_plot(all_sat=True, plot_title="24 hours of satellites tracks close to the center of the beam", filename=f"{day}_all_sat.png")
-        i_freq = 8
+
+        i_freq_length = 49
+
         dB_offset_sim = 0
         dB_offset_data = 35
-        zenith_rot = 135
-        ns_rot = 8.5
+
         ew_rot = 0
+        zenith_rot = 0
+        ns_rot = 90-D3A_ALT_deg # degrees AWAY from zenith ns_rot = 90 means dish is pointed at horizon
+
         i_pol = 1
         x = np.arange(0, 10, 1)
         y = np.arange(85, 95, 1)
-        xv, yv = np.meshgrid(x, y, indexing='ij')
-        # for i in range(10):
-        #     for j in range(10):
-        #         which_5_deg = beam_map.convert_angular_distance_from_center_beam(xv[i][j], yv[i][j])
-        #         if (np.abs(which_5_deg - 3.50) < 2).any():
-        #             print(which_5_deg)
-        #             print(xv[i][j], yv[i][j])
-        # for sat in beam_map.close_sat_beams:
-        for sat in ["C36"]:
-            beam_map.hist_single_sat(sat, i_pol,
-                                     i_freq,
-                                     norm_power=True,
-                                     dB_offset_data=dB_offset_data,
-                                     zenith_rot=zenith_rot,
-                                     ns_rot=ns_rot,
-                                     ew_rot=ew_rot)
+
+        for sat in ["C20"]:
+            for i in range(i_freq_length):
+                beam_map.hist_single_sat(sat, i_pol,
+                                         i,
+                                         norm_power=True,
+                                         dB_offset_data=dB_offset_data,
+                                         zenith_rot=zenith_rot,
+                                         ns_rot=ns_rot,
+                                         ew_rot=ew_rot)
 
 

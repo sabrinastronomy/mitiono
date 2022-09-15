@@ -3,16 +3,8 @@
   <component name="ChangeListManager">
     <list default="true" id="2563b0c5-5733-45a7-a83d-1990d068e441" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/all.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/autocorr_baseband.py" beforeDir="false" afterPath="$PROJECT_DIR$/autocorr_baseband.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/beam_map_nmea.py" beforeDir="false" afterPath="$PROJECT_DIR$/beam_map_nmea.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/beam_map_sbf.ipynb" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/CSTUtils.py" beforeDir="false" afterPath="$PROJECT_DIR$/CSTUtils.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/beam_map_sbf.py" beforeDir="false" afterPath="$PROJECT_DIR$/beam_map_sbf.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/extract_sbf_data.py" beforeDir="false" afterPath="$PROJECT_DIR$/extract_sbf_data.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/poster_ang_dist.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test_ang_dist.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/transit_demo.png" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/use_TLEs.py" beforeDir="false" afterPath="$PROJECT_DIR$/use_TLEs.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -67,7 +59,7 @@
       <recent name="$PROJECT_DIR$" />
     </key>
   </component>
-  <component name="RunManager" selected="Python.use_TLEs">
+  <component name="RunManager" selected="Python.beam_map_sbf (1)">
     <configuration name="beam_map_nmea" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
@@ -180,9 +172,9 @@
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.beam_map_sbf (1)" />
         <item itemvalue="Python.use_TLEs" />
         <item itemvalue="Python.scratch_1" />
-        <item itemvalue="Python.beam_map_sbf (1)" />
         <item itemvalue="Python.scratch" />
         <item itemvalue="Python.beam_map_nmea" />
       </list>
@@ -262,6 +254,12 @@
       <workItem from="1661530222398" duration="251000" />
       <workItem from="1661628334927" duration="1706000" />
       <workItem from="1661662474588" duration="137000" />
+      <workItem from="1662596012557" duration="1833000" />
+      <workItem from="1662744048727" duration="411000" />
+      <workItem from="1663010369304" duration="966000" />
+      <workItem from="1663106355825" duration="584000" />
+      <workItem from="1663180600444" duration="2423000" />
+      <workItem from="1663209950506" duration="2596000" />
     </task>
     <servers />
   </component>
@@ -310,7 +308,7 @@
     <SUITE FILE_PATH="coverage/mitiono_scripts$scratch_3.coverage" NAME="scratch_3 Coverage Results" MODIFIED="1656452762152" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$APPLICATION_CONFIG_DIR$/scratches" />
     <SUITE FILE_PATH="coverage/mitiono_scripts$fast_extract_sat_info.coverage" NAME="fast_extract_sat_info Coverage Results" MODIFIED="1648854007911" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/mitiono_scripts$use_TLEs.coverage" NAME="use_TLEs Coverage Results" MODIFIED="1656567452449" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/mitiono_scripts$beam_map_sbf__1_.coverage" NAME="beam_map_sbf (1) Coverage Results" MODIFIED="1660880642620" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/mitiono_scripts$beam_map_sbf__1_.coverage" NAME="beam_map_sbf (1) Coverage Results" MODIFIED="1663211890841" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/mitiono_scripts$collate__1_.coverage" NAME="collate (1) Coverage Results" MODIFIED="1654643293595" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/mitiono_scripts$beam_map_sbf.coverage" NAME="beam_map_sbf Coverage Results" MODIFIED="1656455579151" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>
