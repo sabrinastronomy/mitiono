@@ -4,16 +4,22 @@ This file extracts data from SBF SatVisibility files returned by the receiver to
 Written by Sabrina Berger and Vincent MacKay
 """
 
-
 from extract_sbf_data import ExtractSBF
-import numpy as np
-import matplotlib.pyplot as plt
+import matplotlib
+# matplotlib.use('pgf')
 from scipy import special
 from CSTUtils import *
 
+# June, 2022
+# D3A_ALT_deg = 81.41
+# D3A_AZ_deg = 180
+#
+# D3A_ALT = 81.41 * np.pi/180
+# D3A_AZ = 180 * np.pi/180
 
+# Post August, 2022
 D3A_ALT_deg = 80.5 # This is the elevation of the dish from horizon
-D3A_AZ_deg = 0 # old
+D3A_AZ_deg = 0 # new
 D3A_ALT = D3A_ALT_deg * np.pi/180
 D3A_AZ = D3A_AZ_deg * np.pi/180
 
@@ -21,8 +27,8 @@ class GetBeamMap(ExtractSBF):
     """
     This class takes in data directories and creates a beam map.
     """
-    def __init__(self, data_direcs):
-        super().__init__(data_direcs=data_direcs, include_elev=True, process=True)
+    def __init__(self, data_direcs, mask_frequency="1", save_parsed_data_direc="parsed_data"):
+        super().__init__(data_direcs=data_direcs, include_elev=True, process=True, mask_frequency=mask_frequency, save_parsed_data_direc=save_parsed_data_direc)
         self.close_sat_beams = []
 
     def print_dictionary(self):
@@ -32,7 +38,8 @@ class GetBeamMap(ExtractSBF):
     def replace_dictionary(self, dict):
         self.all_sat_dict = dict
 
-    def make_plot(self, all_sat, plot_title, sat_list=[], shift=True, direc="/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/plots/", filename="all_sat.png"):
+    def make_plot(self, all_sat, plot_title, sat_list=[], tol_beam=1, shift=True, show_power=False,
+                  direc="/Users/sabrinaberger/Desktop/beam_paper/", filename="all_sat.png"):
         """
         Plot all the satellites or a subset
         param: all_sat - boolean when true all satellites are plotted, when false, looks for satellite in sat_list
@@ -40,38 +47,43 @@ class GetBeamMap(ExtractSBF):
         param: direc - directory where to save the plot
         param: filename - name of plot you're making
         """
-        plt.close()
-        max_power = -200
-        min_power = 0
+
         if all_sat:
             sats_to_plot = self.all_sat_dict
         else:
             sats_to_plot = sat_list
-        plt.close()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
+        min_time = 1e10
+        max_time = 0
+        fig, ax = plt.subplots()
         for key in sats_to_plot:
             if key is not None:
                 satellite = self.all_sat_dict[key]
                 times_cno = satellite["times"][0]
                 times_elevs = satellite["elev_time"][0]
                 elevs = satellite["elevations"][0]
+
+                # getting time over which observations took place
+                if min_time > min(times_elevs):
+                    min_time = min(times_elevs)
+                if max_time < max(times_elevs):
+                    max_time = max(times_elevs)
+
                 az = satellite["azimuths"][0]
                 if shift:  # shift > 180 to negative values
-                    az = np.asarray([-(360 - x) if x > 180 else x for x in az])
+                    # print("Shifted azimuths...")
+                    az = self.shift_az(az)
 
                 cnos = satellite["cno"][0]
                 times_elevs, cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
 
                 power = self.convert_P(cnos)  # dBw
-
                 elev_beam = np.full(len(elevs), D3A_ALT_deg)
                 diff_elev = np.abs(elevs - elev_beam)
                 az_beam = np.full(len(az), D3A_AZ_deg)
                 diff_az = np.abs(az - az_beam)
-
+                print("az", az)
                 # Checking if current satellite passes close to center of beam
-                if (diff_az < 5).any() and (diff_elev < 5).any():
+                if (diff_az < tol_beam).any() and (diff_elev < tol_beam).any():
                     print(f"{key} passes close to center of beam.")
                     self.close_sat_beams.append(key)
                 else: # not including satellites that do NOT pass close to beam center
@@ -79,38 +91,83 @@ class GetBeamMap(ExtractSBF):
 
                 if len(power) < 1:
                     continue
-                max_power_current = max(power)
-                if max_power_current > max_power:
-                    max_power = max_power_current
-
-                min_power_current = min(power)
-                if min_power_current < min_power:
-                    min_power = min_power_current
-                power -= 63.0625 # max power
-                cmap_reversed = plt.cm.get_cmap('viridis_r')
-                scat = ax.scatter(az, elevs, s=0.1, c=power, cmap=cmap_reversed)
-        print(max_power)
+                if show_power:
+                    cmap_reversed = plt.cm.get_cmap('viridis_r')
+                    scat = ax.scatter(az, elevs, s=0.1, c=power, cmap=cmap_reversed)
+                else:
+                    ax.scatter(az, elevs, s=0.1, c="k", alpha=0.01)
         fig.subplots_adjust(right=0.8)
-
-        fig.colorbar(scat)
-        circle1 = plt.Circle((D3A_AZ_deg, D3A_ALT_deg), radius=1.25, color='k', fill=None)
+        circle1 = plt.Circle((D3A_AZ_deg, D3A_ALT_deg), radius=10, color='g', fill=None)
         ax.add_patch(circle1)
+        # print(f"beginning of observation time (GPS seconds): {min_time}")
+        print(f"beginning of observation time (GPS seconds): {min_time}")
+        print(f"end of observation time (GPS seconds): {max_time}")
 
-        circle1 = plt.Circle((21.289999, 81.349998), radius=4, color='r', fill=None)
-        ax.add_patch(circle1)
-        scat.set_clim(-10, -30)
-        ax.scatter(None, None, c="k", label="D3A(6) Beam")
-        ax.scatter(None, None, c="r", label="weird glitch")
-        ax.legend()
-
-        ax.set_xlabel("Azimuth [deg]")
-        ax.set_ylabel("Elevation [deg]")
-        # ax.set_xlim(0, 50)
-        # ax.set_ylim(75, 85)
-
+        if show_power:
+            scat.set_clim(-10, -30)
+            ax.legend()
+        plt.scatter(None, None, c="green",  label="Center of D3A Beam")
+        ax.set_xlabel(r"${\rm Azimuth ~ [deg]}$")
+        ax.set_ylabel(r"${\rm Elevation ~ [deg]}$")
         ax.set_title(plot_title)
-        plt.savefig(direc + filename, dpi=400, bbox_inches='tight')
+        plt.savefig(direc + filename, bbox_inches='tight')
         plt.close()
+
+    def shift_az(self, az_deg):
+        az_deg = np.asarray([-(360 - x) if x > 180 else x for x in az_deg])
+        return az_deg
+
+    def get_one_d_prof(self, sat_name, shift=True):
+        satellite = self.all_sat_dict[sat_name]
+        elevs = satellite["elevations"][0]
+        az = satellite["azimuths"][0]
+        cnos = satellite["cno"][0]
+        times_cno = satellite["times"][0]
+        times_elevs = satellite["elev_time"][0]
+        times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+
+
+        elevs = elevs_deg * np.pi / 180
+        az = az_deg * np.pi / 180
+        if shift: # shift > 180 to negative values
+            az_deg = self.shift_az(az_deg)
+        # masking
+        mask_az = az_deg < D3A_AZ_deg  # left
+        mask = mask_az
+        left_az = az[mask]
+        left_elevs = elevs[mask]
+        left_cnos = cnos[mask]
+        left_angles_rad = self.convert_angular_distance_from_center_beam(left_elevs, left_az)
+        left_angles_deg = left_angles_rad * 180 / np.pi
+        left_angles_deg = -left_angles_deg
+        left_powers = self.convert_P(left_cnos)
+        mask_az = az_deg > D3A_AZ_deg  # right
+        mask = mask_az
+        right_az = az[mask]
+        right_elevs = elevs[mask]
+        right_cnos = cnos[mask]
+        right_angles_rad = self.convert_angular_distance_from_center_beam(right_elevs, right_az)
+        right_angles_deg = right_angles_rad * 180 / np.pi
+        right_powers = self.convert_P(right_cnos)
+        powers = np.concatenate((left_powers, right_powers))
+        angles_deg = np.concatenate((left_angles_deg, right_angles_deg))
+        return angles_deg, powers
+
+    def plot_panel_sats(self, rows=6, cols=3):
+        fig, axes = plt.subplots(rows, cols, figsize=(8, 12))
+        var = 0
+        print("num close_sats", len(self.close_sat_beams))
+        for i in range(rows):
+            for j in range(cols):
+                sat_name = self.close_sat_beams[var]
+                angles_deg, powers = self.get_one_d_prof(sat_name)
+                axes[i][j].scatter(angles_deg, powers, c="k", s=0.05)
+                axes[i][j].set_xlabel(r'${\theta \rm ~ [deg]}$')
+                axes[i][j].set_ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+                axes[i][j].set_title(rf"${sat_name}$")
+                var += 1
+        plt.tight_layout()
+        fig.savefig("panel.png", dpi=900)
 
     @staticmethod
     def get_bessel_0(ka_sintheta):
@@ -142,11 +199,10 @@ class GetBeamMap(ExtractSBF):
             times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
             plt.scatter(times_elevs, cnos, label=sat, s=0.1)
             plt.title(f"L{self.mask_frequency}")
-        # plt.xlim(490000, 495000)
         plt.legend()
         plt.savefig(f"../plots/compare_sats_{self.mask_frequency}.png", dpi=400)
 
-    def hist_single_sat(self, sat_name, i_pol, i_freq, dB_offset_sim=0, dB_offset_data=0, zenith_rot=0, ns_rot=0, ew_rot=0,
+    def fix_hist_single_sat(self, sat_name, i_pol, i_freq, dB_offset_sim=0, dB_offset_data=0, zenith_rot=0, ns_rot=0, ew_rot=0,
                         norm_power=True, shift=True):
         """
         1D profile where y = power, x = distance from pointing center
@@ -161,9 +217,7 @@ class GetBeamMap(ExtractSBF):
         times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
 
         if shift: # shift > 180 to negative values
-            print(az_deg)
             az_deg = np.asarray([-(360 - x) if x > 180 else x for x in az_deg])
-            print(az_deg)
 
         elevs = elevs_deg * np.pi / 180
         az = az_deg * np.pi / 180
@@ -229,9 +283,9 @@ class GetBeamMap(ExtractSBF):
         # so that we can easily change the orientation of the beam when
         # calling that function.
 
-        beams_folder = '/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/notebook_and_beams/new_new_beams/'
-        beam = CSTBeam(beams_folder)
-        rotated_beam = beam.rotate(zenith_rot=D3A_ALT_deg, ns_rot=90-D3A_AZ_deg)
+        beams_folder = '/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/Current Research/mitiono/notebook_and_beams/new_new_beams/'
+        new_beam = CSTBeam(beams_folder)
+        beam = new_beam.rotate(zenith_rot=D3A_ALT_deg, ns_rot=90-D3A_AZ_deg)
 
         # Now, let's solve problem (1).
         # We would have two options: converting the beam to azel,
@@ -248,8 +302,8 @@ class GetBeamMap(ExtractSBF):
         right_sat_theta = np.pi / 2 - right_elevs
         right_sat_phi = right_az
 
-        # Convert to degrees, and don't forget to
-        # round to the nearest beam.theta_step & beam.phi_step
+        # # Convert to degrees, and don't forget to
+        # # round to the nearest beam.theta_step & beam.phi_step
         left_sat_theta_deg = beam.theta_step * np.round((180 / np.pi) * left_sat_theta / beam.theta_step)
         left_sat_phi_deg = beam.phi_step * np.round((180 / np.pi) * left_sat_phi / beam.phi_step)
         right_sat_theta_deg = beam.theta_step * np.round((180 / np.pi) * right_sat_theta / beam.theta_step)
@@ -280,13 +334,13 @@ class GetBeamMap(ExtractSBF):
         # If False, then the dB_offset_data and dB_offset_beam variables can be
         # used to adjust the height of either curve.
         if norm_power:
-            ax.scatter(left_angles_deg, left_powers - max_sat_power, c="k", s=0.5)
-            ax.scatter(right_angles_deg, right_powers - max_sat_power, c="k", s=0.5,
-                       label="GNSS Beam Measurement at ~1.175 GHz")
+            ax.scatter(left_angles_deg, left_powers - max_sat_power, c="k", s=0.1)
+            ax.scatter(right_angles_deg, right_powers - max_sat_power, c="k", s=0.1,)
         else:
-            ax.scatter(left_angles_deg, left_powers - 59.875 + dB_offset_data, c="k", s=0.5)
-            ax.scatter(right_angles_deg, right_powers - 59.875 + dB_offset_data, c="k", s=0.5,
-                       label="GNSS Beam Measurement at ~1.175 GHz")
+            ax.scatter(left_angles_deg, left_powers - 59.875 + dB_offset_data, c="k", s=0.1)
+            ax.scatter(right_angles_deg, right_powers - 59.875 + dB_offset_data, c="k", s=0.1)
+        ax.scatter(left_angles_deg, left_powers, c="k", s=0.1)
+        ax.scatter(right_angles_deg, right_powers, c="k", s=0.1)
 
         # Plot the simulated beam
         line_props = {
@@ -316,8 +370,9 @@ class GetBeamMap(ExtractSBF):
         ax.set_ylabel("Log Power [uncalibrated]")
         ax.set_title(f"Galileo Satellte: {sat_name}")
         ax.legend(loc='lower center')
-        print("Saving single satellite plot at " + f"/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/plots/zr_0/sim_beam_{beam.freqs[i_freq]}_{sat_name}.png".format(beam.freqs[i_freq]))
-        fig.savefig(f"../plots/zr_0/sim_beam_{beam.freqs[i_freq]}_{sat_name}.png", dpi=300, bbox_inches='tight')
+        # print("Saving single satellite plot at " +
+        #       f"/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/Current Research/mitiono/plots/" + f"sim_beam_{beam.freqs[i_freq]}_{sat_name}.png".format(beam.freqs[i_freq], sat_name))
+        fig.savefig(f"test_sim_beam_{sat_name}.png", dpi=300, bbox_inches='tight')
 
     @staticmethod
     def convert_az_el_to_beam_theta_phi(az, el, pitch_offset, roll_offset):
@@ -360,6 +415,34 @@ class GetBeamMap(ExtractSBF):
 
         return theta_sat, phi_sat
 
+    def overplot_days(self, sat_name):
+        satellite = self.all_sat_dict[sat_name]
+
+        times_cno = satellite["times"][0]
+        times_elevs = satellite["elev_time"][0]
+        cnos = satellite["cno"][0]
+        elevs = satellite["elevations"][0]
+        az = satellite["azimuths"][0]
+        times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+        diff_times = np.diff(times_elevs)
+        print(diff_times)
+        indices = np.argwhere(diff_times > 10000).flatten()
+        past_index = 0
+        print(indices)
+        i = 0
+        while i < len(indices):
+            next_index = indices[i]
+            times = times_elevs[past_index:next_index]
+            times = times - times_elevs[past_index+1]
+            plt.scatter(times, cnos[past_index:next_index] + 10*i, label=f"Day {i}", s=0.5)
+            plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+            past_index = indices[i]
+            i += 1
+        plt.legend()
+        plt.title(sat_name)
+        plt.xlim(0, 25000)
+        plt.savefig("overplotted_offset.png")
+
     @staticmethod
     def convert_angular_distance_from_center_beam(alt, az):
 
@@ -401,49 +484,72 @@ class GetBeamMap(ExtractSBF):
         cnos = cnos[cnos_indices]
         return times_elevs, cnos, elevs, az
 
+    def plot_one_d_prof(self, sat_name, direc="/Users/sabrinaberger/Desktop/beam_paper/"):
+        satellite = self.all_sat_dict[sat_name]
+        elevs = satellite["elevations"][0]
+        az = satellite["azimuths"][0]
+        cnos = satellite["cno"][0]
+        times_cno = satellite["times"][0]
+        times_elevs = satellite["elev_time"][0]
 
+        theta_sat, phi_sat = beam_map.get_one_d_prof(sat_name, shift=True)
+
+        plt.close()
+        plt.scatter(theta_sat, phi_sat, c="k", s=0.1)
+        plt.xlabel(r"${\theta \rm ~ [deg]}$")
+        plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+        plt.title(sat_name)
+        plt.savefig(direc + sat_name + "_power_indiv.png", bbox_inches='tight')
+
+        plt.close()
+        plt.scatter(times_cno, cnos, c="k", s=0.1)
+        plt.xlabel(r"${\rm Time ~ [s]}$")
+        plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+        plt.title(sat_name)
+        plt.savefig(direc + sat_name + "_time_indiv.png", bbox_inches='tight')
+
+
+
+# initial data run
+# days = ["June14_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_part2_satellite_dict_all"]
 
 if __name__ == "__main__":
-    direc = "/Volumes/Photos Mac/all_one_drive_MCGILL/D3A(6)_Data_Long_2022/"
-    days = ["August_25_port_2B_part1_Attenuator_GNSS_different_settings"]
-    new_days = []
-    for i, day in enumerate(days):
-        new_days.append(direc + day + "/")
+    ### example to feed in directories
+    directories = ["/Users/sabrinaberger/"]
+    days = ["August_29_port2B/"]
+    parsed_data_directory = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/Current Research/mitiono/parsed_data/L1PY_"]
+    print(directories[0] + days[0])
 
-
-    directories = ["/Users/sabrinaberger/Library/Mobile Documents/com~apple~CloudDocs/mitiono/parsed_data/"]
-    # days = ["June14_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_part2_satellite_dict_all"]
-    # days = ["June_16_port_C2_GNSS_part2_satellite_dict_all"]
+    ## Sample code to parse data files #####
+    # beam_map = GetBeamMap(data_direcs=[directories[0] + days[0]], mask_frequency="L1PY", save_parsed_data_direc="L1PY_parsed_data")
 
     ## Sample code to grab parsed dictionary file ######
-    for day in days:
-        sat_dict = np.load(directories[0] + day + "_satellite_dict_all" + ".npy", allow_pickle=True).item()  # extracting saved dictionary
+    days = ["August_29_port2B"]
 
+    for day in days:
+        sat_dict = np.load(parsed_data_directory[0] + day + "_satellite_dict_all" + ".npy", allow_pickle=True).item()  # extracting saved dictionary
+        print(parsed_data_directory[0] + day)
         beam_map = GetBeamMap(data_direcs=[])
         beam_map.replace_dictionary(sat_dict)
-        beam_map.make_plot(all_sat=True, plot_title="24 hours of satellites tracks close to the center of the beam", filename=f"{day}_all_sat.png")
+        # beam_map.plot_one_d_prof("G14")
+        beam_map.overplot_days("G14")
 
-        i_freq_length = 49
+        # beam_map.make_plot(all_sat=["G14"], plot_title=r"${\rm 24 ~ hours ~ of ~ satellites' ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
 
-        dB_offset_sim = 0
-        dB_offset_data = 35
-
-        ew_rot = 0
-        zenith_rot = 0
-        ns_rot = 90-D3A_ALT_deg # degrees AWAY from zenith ns_rot = 90 means dish is pointed at horizon
-
-        i_pol = 1
-        x = np.arange(0, 10, 1)
-        y = np.arange(85, 95, 1)
-
-        for sat in ["C20"]:
-            for i in range(i_freq_length):
-                beam_map.hist_single_sat(sat, i_pol,
-                                         i,
-                                         norm_power=True,
-                                         dB_offset_data=dB_offset_data,
-                                         zenith_rot=zenith_rot,
-                                         ns_rot=ns_rot,
-                                         ew_rot=ew_rot)
-
-
+        # angles_deg, powers = beam_map.get_one_d_prof("G14")
+        # plt.scatter(angles_deg, 2*powers, s=0.1)
+        # plt.show()
+        #
+        #
+        # i_freq_length = 49
+        #
+        # dB_offset_sim = 0
+        # dB_offset_data = 35
+        #
+        # ew_rot = 0
+        # zenith_rot = 0
+        # ns_rot = D3A_ALT_deg - 90 # degrees AWAY from zenith ns_rot = 90 means dish is pointed at horizon
+        #
+        # i_pol = 1
+        #
+        # beam_map.fix_hist_single_sat("G14", i_pol, 10)

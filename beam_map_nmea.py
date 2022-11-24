@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 d3a_first_beam_map = "/Users/sabrinaberger/Desktop/June14_port_C2_GNSS/"
 
 # setting the seaborn theme, ignore for now
-sns.set_theme()
+# sns.set_theme()
 
 # Create a way for the user to input file they'd like to parse below
 # log_input = input("What file would you like to parse > ")

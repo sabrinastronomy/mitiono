@@ -16,19 +16,20 @@ class ExtractSBF:
     This class takes in a data directories and parses the file for all required information necessary for ionospheric
     mapping (GetIonoMap class) and beam mapping (GetBeamMap class).
     """
-    def __init__(self, data_direcs, min_elev=0, process=True, include_elev=True, mask_frequency="1"):
+    def __init__(self, data_direcs, min_elev=0, process=True, include_elev=True, mask_frequency="1", save_parsed_data_direc="parsed_data"):
         """
-        :param data_direc - directory with receiver raw files
+        :param data_direc - list of files, directory with receiver raw files
         :param filename_sats_pr - file containing pseudorange data, i.e., measurements.txt file
         :param filename_sats_elevs -  file containing elevation/altitude data, i.e., SatVisibility file
         :param dict_name - dictionary name to save parsed data to
         :param min_elev - minimum elevation of included satellites
         """
+        assert(type(data_direcs) == list)
         self.data_direcs = data_direcs
         self.min_elev = min_elev
         self.include_elev = include_elev
         self.mask_frequency = mask_frequency
-
+        self.save_parsed_data_direc = save_parsed_data_direc
         ## Set params
         ##########################################
         self.reset_params()
@@ -72,8 +73,8 @@ class ExtractSBF:
                     sat_vises.append(file)
             dict_name_from_direc = direc.split("/")[-2]
             print(f"direc {direc}")
-            self.dict_name = f"../parsed_data/{dict_name_from_direc}_satellite_dict_all"
-
+            self.dict_name = f"../{self.save_parsed_data_direc}/{dict_name_from_direc}_satellite_dict_all"
+            print(f"Saving all parsed data to {self.dict_name}.")
             for measure, sat_vis in zip(measures, sat_vises):
                 self.filename_sats_pr, self.filename_sats_elevs = direc + measure, direc + sat_vis
                 self.update_files(direc, measure, sat_vis)
