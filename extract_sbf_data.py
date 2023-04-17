@@ -16,15 +16,13 @@ class ExtractSBF:
     This class takes in a data directories and parses the file for all required information necessary for ionospheric
     mapping (GetIonoMap class) and beam mapping (GetBeamMap class).
     """
-    def __init__(self, data_direcs, min_elev=0, process=True, include_elev=True, mask_frequency="1", save_parsed_data_direc="parsed_data"):
+    def __init__(self, data_direcs, masking=True, min_elev=0, process=True, include_elev=True, mask_frequency="1", save_parsed_data_direc="parsed_data"):
         """
         :param data_direc - list of files, directory with receiver raw files
-        :param filename_sats_pr - file containing pseudorange data, i.e., measurements.txt file
-        :param filename_sats_elevs -  file containing elevation/altitude data, i.e., SatVisibility file
-        :param dict_name - dictionary name to save parsed data to
-        :param min_elev - minimum elevation of included satellites
+        TODO finishing this
         """
         assert(type(data_direcs) == list)
+        self.masking = masking
         self.data_direcs = data_direcs
         self.min_elev = min_elev
         self.include_elev = include_elev
@@ -46,19 +44,19 @@ class ExtractSBF:
 
         ### Variables to be extracted from Measurement Files ###
 
-        self.pr = np.full(int(19e6), -1.)
-        self.all_times = np.full(int(19e6), -1.)
-        self.wnc = np.full(int(19e6), -1.)
-        self.c_n_0 = np.full(int(19e6), -1.)
-        self.sat_id = np.empty(int(19e6), dtype=object)
-        self.sig_type = np.empty(int(19e6), dtype=object)
+        self.pr = np.full(int(19e7), -1.)
+        self.all_times = np.full(int(19e7), -1.)
+        self.wnc = np.full(int(19e7), -1.)
+        self.c_n_0 = np.full(int(19e7), -1.)
+        self.sat_id = np.empty(int(19e7), dtype=object)
+        self.sig_type = np.empty(int(19e7), dtype=object)
 
         ### Variables to be from SatVisibility Files ###
-        self.az = np.full(int(19e6), -1.)
-        self.elev_new_times = np.full(int(19e6), -1.)  # allocating numpy array for times values
-        self.elev_new_times_WNC = np.full(int(19e6), -1.)
-        self.elev = np.full(int(19e6), -1.)  # allocating numpy array for elevations
-        self.elev_new_sat_id = np.empty(int(19e6), dtype=object)  # allocating numpy array for satellite name values
+        self.az = np.full(int(19e7), -1.)
+        self.elev_new_times = np.full(int(19e7), -1.)  # allocating numpy array for times values
+        self.elev_new_times_WNC = np.full(int(19e7), -1.)
+        self.elev = np.full(int(19e7), -1.)  # allocating numpy array for elevations
+        self.elev_new_sat_id = np.empty(int(19e7), dtype=object)  # allocating numpy array for satellite name values
 
     def parse_data_direcs(self, convert_to_dict=True):
         ### grab all measurement and SatVisibility files from data_direcs inputted ###
@@ -73,7 +71,10 @@ class ExtractSBF:
                     sat_vises.append(file)
             dict_name_from_direc = direc.split("/")[-2]
             print(f"direc {direc}")
-            self.dict_name = f"../{self.save_parsed_data_direc}/{dict_name_from_direc}_satellite_dict_all"
+            if self.masking:
+                self.dict_name = f"{self.save_parsed_data_direc}/{dict_name_from_direc}_satellite_dict_all_{self.mask_frequency}"
+            else:
+                self.dict_name = f"{self.save_parsed_data_direc}/{dict_name_from_direc}_satellite_dict_all"
             print(f"Saving all parsed data to {self.dict_name}.")
             for measure, sat_vis in zip(measures, sat_vises):
                 self.filename_sats_pr, self.filename_sats_elevs = direc + measure, direc + sat_vis
@@ -115,7 +116,7 @@ class ExtractSBF:
             curr_wnc = self.wnc[mask]
             curr_cnos = self.c_n_0[mask] # grabbing cnos and times for a specific satellite
             curr_pr = self.pr[mask] # grabbing cnos and times for a specific satellite
-
+            curr_sig_type = self.sig_type[mask] # grabbing signal types for each observation
             # getting masks for SatVisibility
             if key not in id_dict_elev.keys():
                 continue
@@ -132,6 +133,7 @@ class ExtractSBF:
                 self.all_sat_dict[key]["times"] = []
                 self.all_sat_dict[key]["wnc"] = []
                 self.all_sat_dict[key]["pr"] = []
+                self.all_sat_dict[key]["sig_type"] = []
 
                 if self.include_elev:
                     self.all_sat_dict[key]["elevations"] = []
@@ -143,13 +145,14 @@ class ExtractSBF:
             self.all_sat_dict[key]["cno"].append(curr_cnos)
             self.all_sat_dict[key]["times"].append(curr_times)
             self.all_sat_dict[key]["wnc"].append(curr_wnc)
-
             self.all_sat_dict[key]["pr"].append(curr_pr)
+            self.all_sat_dict[key]["sig_type"].append(curr_sig_type)
 
-            self.all_sat_dict[key]["elevations"].append(curr_elev)
-            self.all_sat_dict[key]["azimuths"].append(curr_az)
-            self.all_sat_dict[key]["elev_time"].append(time_elev)
-            self.all_sat_dict[key]["wnc_elev_time"].append(wnc_time_elev)
+            if self.include_elev:
+                self.all_sat_dict[key]["elevations"].append(curr_elev)
+                self.all_sat_dict[key]["azimuths"].append(curr_az)
+                self.all_sat_dict[key]["elev_time"].append(time_elev)
+                self.all_sat_dict[key]["wnc_elev_time"].append(wnc_time_elev)
         self.save_sat_dict()
 
     def save_sat_dict(self):
@@ -183,11 +186,15 @@ class ExtractSBF:
 
         for i in range(n):
             tags = lines[i].split(',')
-            if tags[5] == '' or tags[5] == 0.0 or self.mask_frequency not in tags[3]:
+            if self.masking and (tags[5] == '' or tags[5] == 0.0 or self.mask_frequency not in tags[3]):
                 continue
+
             self.pr[self.j] = float(tags[5])
             self.sat_id[self.j] = tags[2]
             self.sig_type[self.j] = tags[3]
+            if self.sat_id[self.j] == "G14":
+                print("A G14 signal type: ")
+                print(self.sig_type[self.j])
             self.all_times[self.j] = float(tags[0])
             self.wnc[self.j] = float(tags[1])
             self.c_n_0[self.j] = float(tags[-2])

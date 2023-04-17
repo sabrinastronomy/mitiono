@@ -1,6 +1,6 @@
 """
 This file extracts data from NMEA files returned by the receiver to generate a beam map. NMEA data does not
-generate elevations or S/N accurate enough for meaningful beam maps. However, this script is perserved for future
+generate elevations or S/N accurate enough for meaningful beam maps. However, this script is preserved for future
 reference or when needing to parse NMEA data.
 
 Written by Sabrina Berger
