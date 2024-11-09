@@ -9,11 +9,12 @@ from extract_sbf_data import ExtractSBF
 import matplotlib
 from scipy import special
 from CSTUtils import *
-from math import radians
-from pyuvdata import UVBeam
-
-
-
+import healpy
+from functools import reduce
+from scipy.stats import binned_statistic_2d
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+import scipy
 matplotlib.rcParams['mathtext.fontset'] = 'stix'
 matplotlib.rcParams['font.family'] = 'STIXGeneral'
 
@@ -30,651 +31,803 @@ D3A_AZ_deg = 0 # new
 D3A_ALT = D3A_ALT_deg * np.pi/180
 D3A_AZ = D3A_AZ_deg * np.pi/180
 
-class GetBeamMap(ExtractSBF):
-    """
-    This class takes in data directories and creates a beam map.
-    """
-    def __init__(self, data_direcs, mask_frequency="1", save_parsed_data_direc="parsed_data", plot_dir="/Users/sabrinaberger/Desktop/beam_paper_plots/", masking=False):
-        super().__init__(data_direcs=data_direcs, include_elev=True, process=True, mask_frequency=mask_frequency, save_parsed_data_direc=save_parsed_data_direc, masking=masking)
-        self.plot_dir = plot_dir
-        self.panel_plot_num = 0 # number of panel plot so we can plot multiple satellites
-        if self.all_sat_dict != None:
-            self.get_close_sats()
-
-    def print_dictionary(self):
-        print(self.all_sat_dict)
-        return
-
-    def replace_dictionary(self, dict):
-        self.all_sat_dict = dict
-        self.get_close_sats()
-
-    def get_close_sats(self, tol_beam=10):
-        self.close_sat_beams = []
-
-        min_diff_az = 100
-        min_diff_el = 100
-        min_nam = ""
-        for key in self.all_sat_dict:
-            if key is not None:
-                satellite = self.all_sat_dict[key]
-                times_cno = satellite["times"][0] # SECONDS
-                times_elevs = satellite["elev_time"][0] # SECONDS
-                cnos = satellite["cno"][0]
-                elevs = satellite["elevations"][0]
-                az = satellite["azimuths"][0]
-
-                times_elevs, cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-                elev_beam = np.full(len(elevs), D3A_ALT_deg)
-                diff_elev = np.abs(elevs - elev_beam)
-                az_beam = np.full(len(az), D3A_AZ_deg)
-                diff_az = np.abs(az - az_beam)
-
-                # if min_diff_az > min(diff_az) and min_diff_el > min(diff_elev):
-                #     min_diff_az = min(diff_az)
-                #     min_diff_el = min(diff_elev)
-                #     min_nam = key
-                # Checking if current satellite passes close to center of beam
-                if (diff_az < tol_beam).any() and (diff_elev < tol_beam).any():
-                    print(f"{key} passes close to center of beam.")
-                    min_diff_az = min(diff_az)
-                    min_diff_el = min(diff_elev)
-                    print(f"min diff az: {min_diff_az}")
-                    print(f"min diff elev: {min_diff_el}")
-
-                    self.close_sat_beams.append(key)
-                else:  # not including satellites that do NOT pass close to beam center
-                    continue
-        print(f"Total number of near beam satellites is {len(self.close_sat_beams)}.")
-
-    def get_min_max(self, arrs):
-        arr_concatenated = np.concatenate(arrs, axis=0)
-        min_arr, max_arr = arr_concatenated.min(), arr_concatenated.max()
-        return min_arr, max_arr
-
-    def make_plot(self, all_sat, plot_title, sat_list=[], shift=True, show_power=False, filename="all_sat.png", zoom=True):
-        """
-        Plot all the satellites or a subset
-        param: all_sat - boolean when true all satellites are plotted, when false, looks for satellite in sat_list
-        param: plot_title - title above plot to be generated
-        param: direc - directory where to save the plot
-        param: filename - name of plot you're making
-        """
-        if all_sat:
-            sats_to_plot = self.all_sat_dict
-        else:
-            sats_to_plot = sat_list
-        min_time = 1e10
-        max_time = 0
-
-        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        powers_arr = []
-
-        for i, key in enumerate(sats_to_plot):
-            satellite = self.all_sat_dict[key]
-            cnos = satellite["cno"][0]
-            times_cno = satellite["times"][0]
-            times_elevs = satellite["elev_time"][0]
-            elevs = satellite["elevations"][0]
-            az = satellite["azimuths"][0]
-
-            _, cnos, _, _ = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-            powers_arr.append(cnos)
-        min_power, max_power = self.get_min_max(powers_arr)
-
-        for i, key in enumerate(sats_to_plot):
-            if key is not None:
-                satellite = self.all_sat_dict[key]
-                times_cno = satellite["times"][0]
-                times_elevs = satellite["elev_time"][0]
-                wnc = satellite["wnc"][0]
-
-                elevs = satellite["elevations"][0]
-                x = ExtractSBF.weeksecondstoutc(gpsweek=wnc[0], gpsseconds=times_cno[0])
-                # getting time over which observations took place
-                if min_time > min(times_elevs):
-                    min_time = min(times_elevs)
-                if max_time < max(times_elevs):
-                    max_time = max(times_elevs)
-
-                az = satellite["azimuths"][0]
-                if shift:  # shift > 180 to negative values
-                    print("Shifted azimuths...")
-                    az = self.shift_az(az)
-
-                cnos = satellite["cno"][0]
-                times_elevs, cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-                power = self.convert_P(cnos)
-                powers_arr.append(power)
-
-                if len(power) < 1:
-                    continue
-                if show_power:
-                    cmap = plt.cm.get_cmap('viridis')
-                    scat = ax.scatter(np.deg2rad(az), 90-elevs, s=5, c=power, cmap=cmap, vmin=min_power, vmax=max_power)
-                else:
-                    ax.scatter(np.deg2rad(az), 90-elevs, s=0.01, c="k")
-                    print(np.deg2rad(az[:2]), elevs[:2])
-
-        # fig.subplots_adjust(right=0.8)
-        # N = 100
-        # theta = np.random.rand(N) * np.pi * 2
-        # r = np.cos(theta * 2) + np.random.randn(N) * 0.1
-        # ax.scatter(theta, r)
-        # s = 100*1.22 * 0.2 / 6
-        # circle = plt.Circle((0, np.deg2rad(90-D3A_ALT_deg)), s, fill=False, color="cyan")
-        # ax.add_artist(circle)
-
-        # Define the center of the circle
-        r_center = 90 - 80.5  # altitude (radius)
-        theta_center = 0  # azimuth (angle in radians, converted from degrees)
-
-        # Convert polar coordinates (r_center, theta_center) to Cartesian coordinates
-        x_center = r_center * np.cos(theta_center)
-        y_center = r_center * np.sin(theta_center)
-
-        # Define the radius of the circle
-        circle_radius = 100*1.22 * 0.2 / 6
-
-        # Create the circle in Cartesian coordinates
-        # circle = plt.Circle((0, 1), circle_radius, fill=False, color='cyan')
-        circle = plt.Circle((x_center, y_center), circle_radius, fill=False, color='black',
-                            transform=ax.transData._b, linewidth=1)
-        # Add the circle to the plot
-        ax.add_artist(circle)
-        # cax = plt.axes([0.85, 0.1, 0.075, 0.8])
-        # plt.colorbar(cax=cax)
-        # # print(f"beginning of observation time (GPS seconds): {min_time}")
-        # print(f"beginning of observation time (GPS seconds): {min_time}")
-        # print(f"end of observation time (GPS seconds): {max_time}")
-
-        # plt.scatter(None, None, c="green",  label="Center of D3A Beam")
-        # ax.set_xlabel(r"${\rm Azimuth ~ [deg]}$")
-        # ax.set_ylabel(r"${\rm Elevation ~ [deg]}$")
-
-
-
-        ax.set_theta_zero_location('E')
-        # ax.set_theta_direction(-1)
-
-        ax.set_title(plot_title)
-        if show_power:
-            colorbar = fig.colorbar(scat)
-            colorbar.set_label(r'$C/N_0$ [db-Hz]', rotation=270, labelpad=15)
-
-        # plt.legend()
-        # if zoom:
-        #     ax.set_thetalim(0, np.pi)
-        circle_radius = 3 * 100 * 1.22 * 0.2 / 6
-        # convert circle_radius to polar plot limits
-        zoom_radius = circle_radius  # Add some margin around the circle
-        ax.set_yticks(range(0, 90 + 10, 10))  # Define the yticks
-        # yLabel = ['90', '80', '70', '60', '50', '', '30', '', '', '']
-        yLabel = ['90', '80', '70', '', '', '', '', '', '', '']
-        ax.set_ylim(90 - (D3A_ALT_deg + zoom_radius), 90 - (D3A_ALT_deg - zoom_radius))
-
-
-        ax.set_yticklabels(yLabel)
-        plt.savefig(self.plot_dir + filename, bbox_inches='tight', dpi=300)
-        plt.close()
-
-    def shift_az(self, az_deg):
-        az_deg = np.asarray([-(360 - x) if x > 180 else x for x in az_deg])
-        return az_deg
-
-    def mask_array_for_one_d(self, az, elevs, cnos, mask, side, times):
-        assert(side == "right" or side == "left")
-        az = az[mask]
-        elevs = elevs[mask]
-        cnos = cnos[mask]
-        times = times[mask]
-        angles_rad = self.convert_angular_distance_from_center_beam(elevs, az)
-        angles_deg = angles_rad * 180 / np.pi
-        if "left":
-            angles_deg = -angles_deg # getting sign right for left
-        powers = self.convert_P(cnos)
-        return angles_deg, powers, times
-
-    def save_particular_sat(self, sat_name):
-        satellite = self.all_sat_dict[sat_name]
-        elevs = satellite["elevations"][0]
-        az = satellite["azimuths"][0]
-        cnos = satellite["cno"][0]
-        times_cno = satellite["times"][0]
-        times_elevs = satellite["elev_time"][0]
-        times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-
-        np.save(f"{sat_name}_times.npy", times_elevs)
-        np.save(f"{sat_name}_cnos.npy", cnos)
-        np.save(f"{sat_name}_elev.npy", elevs_deg)
-        np.save(f"{sat_name}_az.npy", az_deg)
-
-    def get_angles_for_one_d_prof(self, sat_name, shift=True, select_pass=False):
-        """
-        Gives you a 1D profile for a satellite as a function of angular distance from beam
-        :param sat_name - name of satellite
-        :param shift - whether or not to shift azimuths with shift_az
-        :return angles_deg, powers - theta and power of a one d beam profile for a given satellite
-        """
-        satellite = self.all_sat_dict[sat_name]
-        elevs = satellite["elevations"][0]
-        az = satellite["azimuths"][0]
-        cnos = satellite["cno"][0]
-        times_cno = satellite["times"][0]
-        times_elevs = satellite["elev_time"][0]
-        times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-        i = 0
-        if select_pass:
-            diff_times = np.diff(times_elevs)
-            indices = np.argwhere(diff_times > 10000).flatten()
-            print(indices[i])
-            elevs = elevs_deg[:indices[i]] * np.pi / 180
-            az = az_deg[:indices[i]] * np.pi / 180
-            az_deg = az_deg[:indices[i]]
-            cnos = cnos[:indices[i]]
-        else:
-            elevs = elevs_deg * np.pi / 180
-            az = az_deg * np.pi / 180
-        if shift: # shift > 180 to negative values
-            az_deg = self.shift_az(az_deg)
-
-        # masking
-        right_mask = az_deg > D3A_AZ_deg  # right
-        left_mask = az_deg < D3A_AZ_deg  # left
-        # this takes in radians
-        right_angles_deg, right_powers, right_times = self.mask_array_for_one_d(az, elevs, cnos, right_mask, "right", times_elevs)
-        left_angles_deg, left_powers, left_times = self.mask_array_for_one_d(az, elevs, cnos, left_mask, "left", times_elevs)
-
-        plt.close()
-        plt.scatter(right_times, right_angles_deg)
-        plt.show()
-        plt.close()
-
-        # powers = np.concatenate((left_powers, right_powers))
-        # angles_deg = np.concatenate((left_angles_deg, right_angles_deg))
-        return left_angles_deg, left_powers, right_angles_deg, right_powers
-
-    def convert_C_n_to_SNR_linear(self, c_n, bw=2e6):
-        # assuming nominal L1 bandwidth of 2Mhz
-        c_n = np.asarray(c_n)
-        bw = np.log10(bw)
-        s_n_db = c_n - bw
-        s_n_linear = 10**(s_n_db/10)
-        return s_n_linear
-
-    def convert_SNR_linear_C_n(self, SNR_linear, bw=2e6):
-        # assuming nominal L1 bandwidth of 2Mhz
-        s_n_db = 10 * np.log10(SNR_linear)
-        bw = np.log10(bw)
-        c_n = s_n_db + bw
-        return c_n
-
-    def average_C_N_0(self, c_n, angles, bw=2e6, linear_conversion=False):
-        unique_angles_deg = np.unique(angles)
-        if linear_conversion:
-            s_n_linear = self.convert_C_n_to_SNR_linear(c_n)
-            s_n_linear_average = np.array([np.mean(s_n_linear[angles == value]) for value in unique_angles_deg])
-            s_n_linear_rms = np.array([np.std(s_n_linear[angles == value], ddof=0) for value in unique_angles_deg])
-            c_n_average = self.convert_SNR_linear_C_n(s_n_linear_average)
-            s_n_linear_rms_mask = s_n_linear_rms == 0
-            s_n_linear_rms[s_n_linear_rms_mask] = 1
-            c_n_rms = 10 * np.log10(s_n_linear_rms)
-        else:
-            s_n_linear = self.convert_C_n_to_SNR_linear(c_n)
-            s_n_linear_average = np.array([np.mean(s_n_linear[angles == value]) for value in unique_angles_deg])
-            c_n_average = self.convert_SNR_linear_C_n(s_n_linear_average)
-            c_n_rms = np.array([np.std(c_n[angles == value], ddof=0) for value in unique_angles_deg])
-
-        return unique_angles_deg, c_n_average, c_n_rms
-
-
-    def plot_panel_sats(self, rows=6, cols=3, start=0, end=19, chosen=True, figsize=(8, 12), offset=True, want_theta=False, want_time=False, rms=False):
-        fig, axes = plt.subplots(rows, cols, figsize=figsize)
-        var = 0
-        print("num close_sats", len(self.close_sat_beams))
-        if chosen:
-            close_sat_beams = self.chosen_list
-        else:
-            close_sat_beams = self.close_sat_beams[start:end] # local to function version, NO SELF
-
-        sat_names = []
-        peak_sigmas = []
-        peak_powers = []
-
-        for i in range(rows):
-            for j in range(cols):
-                print("row", i, "col", j)
-                sat_name = close_sat_beams[var]
-                if want_theta:
-                    left_angles_deg, left_powers, right_angles_deg, right_powers = self.get_angles_for_one_d_prof(
-                        sat_name, shift=True)
-                    unique_angles_deg = np.unique(left_angles_deg)
-                    counts_left = np.array([np.sum(left_angles_deg == value) for value in unique_angles_deg])
-
-                    # get counts left = 1
-                    counts_left_mask = counts_left < 2
-
-                    unique_angles_deg = np.unique(right_angles_deg)
-                    counts_right = np.array([np.sum(right_angles_deg == value) for value in unique_angles_deg])
-                    counts_right_mask = counts_right < 2
-
-
-                    print("average counts right")
-                    print(np.average(counts_right))
-                    unique_left_angles_deg, avg_left_powers, avg_left_sigma = self.average_C_N_0(left_powers, left_angles_deg)
-                    unique_right_angles_deg, avg_right_powers, avg_right_sigma = self.average_C_N_0(right_powers, right_angles_deg)
-
-                    print("average sigma value")
-                    print(np.average(avg_right_sigma))
-                    all_sigma = np.concatenate((avg_left_sigma, avg_right_sigma))
-                    all_power = np.concatenate((avg_left_powers, avg_right_powers))
-
-                    sat_names.append(sat_name)
-                    peak_sigmas.append(np.max(all_sigma))
-                    peak_powers.append(np.max(all_power))
-
-
-                    axes[i][j].scatter(unique_left_angles_deg, avg_left_powers, s=0.1, label=sat_name, c="k")
-                    axes[i][j].scatter(-unique_right_angles_deg, avg_right_powers, s=0.1, c="k")
-
-                    axes[i][j].scatter(unique_left_angles_deg[counts_left_mask], avg_left_powers[counts_left_mask], s=1, label=sat_name, c="red")
-                    axes[i][j].scatter(-unique_right_angles_deg[counts_right_mask], avg_right_powers[counts_right_mask], s=1, c="red")
-
-                    axes[i][j].fill_between(unique_left_angles_deg, avg_left_powers - avg_left_sigma, avg_left_powers + avg_left_sigma, color='blue', alpha=0.5)
-                    axes[i][j].fill_between(-unique_right_angles_deg, avg_right_powers - avg_right_sigma, avg_right_powers + avg_right_sigma, color='blue', alpha=0.5)
-
-                    # axes[i][j].scatter(left_angles_deg, np.average(left_powers), s=0.5, label=sat_name, c="k")
-                    # axes[i][j].scatter(-right_angles_deg, np.average(right_powers), s=0.5, c="k")
-                    axes[i][j].set_xlabel(r"${\theta \rm ~ [deg]}$")
-                    axes[i][j].set_ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
-                    axes[i][j].set_title(rf"${sat_name}$")
-                    axes[i][j].set_xlim((-90, 90))
-
-                elif want_time:
-                    satellite = self.all_sat_dict[sat_name]
-                    times_cno = satellite["times"][0]
-                    times_elevs = satellite["elev_time"][0]
-                    cnos = satellite["cno"][0]
-                    elevs = satellite["elevations"][0]
-                    az = satellite["azimuths"][0]
-                    times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-                    diff_times = np.diff(times_elevs)
-                    indices = np.argwhere(diff_times > 10000).flatten()
-                    past_index = 0
-                    k = 0
-                    if rms:
-                        cnos_rms = []
-                        times_rms = []
-                    pass_num = 0
-                    while k < len(indices):
-                        next_index = indices[k]
-                        times = times_elevs[past_index:next_index]
-                        time_print = ExtractSBF.weeksecondstoutc(2225, times_elevs[next_index])
-                        # print(time_print)
-                        times = times - times_elevs[past_index + 1]  # CONVERTING TO MINUTES
-                        times /= 360
-                        if len(times) < 500:
-                            past_index = indices[k]
-                            k += 1
-                            continue
-                        # print("passes must be greater than this length")
-                        # print(times[250] - times[0])
-                        # print(times_elevs[250] - times_elevs[0])
-                        if rms:
-                            length = next_index-past_index
-                            cnos_rms.append(cnos[past_index:next_index])
-                            times_rms.append(times)
-
-                        else:
-                            if offset:
-                                axes[i][j].scatter(times, cnos[past_index:next_index] + 20 * k, s=1, label = f"Pass {pass_num}")
-                            else:
-                                axes[i][j].scatter(times, cnos[past_index:next_index], c="k", s=0.05)
-
-                        past_index = indices[k]
-                        times_max = max(times) # need to take max of times here to ensure it got through the if loop
-                        k += 1
-                        pass_num += 1
-
-                    if rms:
-                        # Determine the maximum length of the lists
-                        min_length = min(len(lst) for lst in cnos_rms)
-
-                        trimmed_lists = [lst[:min_length] for lst in cnos_rms]
-
-                        # cnos_rms = np.transpose(cnos_rms) # switching to get in right order for stds
-                        cnos_std = np.std(trimmed_lists, axis=1)
-                        axes[i][j].plot(cnos_std, c="k")
-                        axes[i][j].set_xlabel(r'Time [hr]')
-                        axes[i][j].set_ylabel(r'$\sigma_{C/N_0}$')
-                        axes[i][j].set_title(rf"${sat_name}$")
-                    else:
-                        axes[i][j].legend(loc='upper right')
-                        axes[i][j].set_xlabel(r'Time [hr]')
-                        axes[i][j].set_ylabel(r'Offset ${C/N_0 \rm ~ [dB-Hz]}$')
-                        axes[i][j].set_title(rf"${sat_name}$")
-                        axes[i][j].set_xlim((0, times_max))
-                var += 1
-        plt.tight_layout()
-        if rms:
-            fig.savefig(self.plot_dir + f"RMS_panel_{self.panel_plot_num}.png", dpi=300)
-        else:
-            if want_time:
-                fig.savefig(self.plot_dir + f"time_panel_{self.panel_plot_num}.png", dpi=300)
-            elif want_theta:
-                fig.savefig(self.plot_dir + f"theta_panel_{self.panel_plot_num}.png", dpi=300)
-            else:
-                print("You didn't specify theta, time, or RMS.")
-        self.panel_plot_num += 1
-
-        # Start constructing the LaTeX table string
-        latex_table = r"\begin{table}[ht]\n\centering\n\begin{tabular}{|c|c|c|c|}\n\hline\n"
-        latex_table += "Satellite & Peak $\sigma$ & Peak $C/N_0$ \\\\ \\hline\n"
-
-        # Single loop to fill in table rows
-        for idx, (sat, sigma, peak_power) in enumerate(zip(sat_names, peak_sigmas, peak_powers)):
-            latex_table += f"{sat} & {sigma:.2f} & {peak_power:.2f} \\\\ \\hline\n"
-
-        # Finish the LaTeX table
-        latex_table += r"\end{tabular}\n\caption{Satellite Data Table}\n\end{table}"
-
-        # Output LaTeX table string
-        print(latex_table)
-
-
-    def get_airy_total_intensity(self, theta, max_inten, k=2*np.pi/0.2, a=3):
-        ka_sintheta = k * a * np.sin(theta) # theta is in rad
-        bessel_1 = self.get_bessel_1(ka_sintheta)
-        return max_inten * (2*bessel_1 / ka_sintheta)**2
-
-    def get_airy_total_pow(self, theta, max_power, k=2*np.pi/0.2, a=3):
-        ka_sintheta = k * a * np.sin(theta) # theta is in rad
-        bessel_0 = self.get_bessel_0(ka_sintheta)**2
-        bessel_1 = self.get_bessel_1(ka_sintheta)**2
-        return max_power * (1 - bessel_0 - bessel_1)
-
-    def compare_sats(self, list_sats):
-        for sat in list_sats:
-            satellite = self.all_sat_dict[sat]
-            elevs = satellite["elevations"][0]
-            az = satellite["azimuths"][0]
-            cnos = satellite["cno"][0]
-            times_cno = satellite["times"][0]
-            times_elevs = satellite["elev_time"][0]
-            times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-            plt.scatter(times_elevs, cnos, label=sat, s=0.1)
-            plt.title(f"L{self.mask_frequency}")
-        plt.legend()
-        plt.savefig(f"../plots/compare_sats_{self.mask_frequency}.png", dpi=400)
-
-
-    @staticmethod
-    def convert_az_el_to_beam_theta_phi(az, el, pitch_offset, roll_offset):
-        """
-        This function converts the azimuth and elevation coordinates of the
-        satellite's position to theta and phi coordinates centered around
-        the beam boresight.
-
-        The function has three steps.
-        First, it converts to cartesian coordinates, where doing a rotation
-        is easier.
-        Second, it performs the rotation.
-        Third, it converts to theta/phi.
-        """
-
-        # First, convert (az,el) to cartesian, just copy-pasting
-        # the convert_angular_distance_from_center_beam function.
-        x_sat = np.cos(az) * np.cos(el)
-        y_sat = np.sin(az) * np.cos(el)
-        z_sat = np.sin(el)
-
-        # Then, rotate those coordinates so that they are aligned with
-        # the beam.
-        # It is sufficient to just rotate around two axes in this context,
-        # so I do z-axis, followed by y-axis.
-        theta_z = 0 + roll_offset * (np.pi / 180)
-        theta_y = D3A_ALT + pitch_offset * (np.pi / 180)
-        Rz = np.matrix([[np.cos(theta_z), -np.sin(theta_z), 0],
-                        [np.sin(theta_z), np.cos(theta_z), 0],
-                        [0, 0, 1]])
-        Ry = np.matrix([[np.cos(theta_y), 0, np.sin(theta_y)],
-                        [0, 1, 0],
-                        [-np.sin(theta_y), 0, np.cos(theta_y)]])
-        # cart_rot = np.matmul(Ry,np.matmul(Rz,np.array([x_sat,y_sat,z_sat])))
-        cart_rot = np.array(Ry.dot(Rz.dot(np.array([x_sat, y_sat, z_sat]))))
-
-        # Convert back to theta/phi
-        theta_sat = np.arctan2((cart_rot[0] ** 2. + cart_rot[1] ** 2.) ** 0.5, cart_rot[2])
-        phi_sat = np.arctan2(cart_rot[1], cart_rot[0])
-
-        return theta_sat, phi_sat
-
-    def overplot_days(self, sat_name):
-        satellite = self.all_sat_dict[sat_name]
-        times_cno = satellite["times"][0]
-        times_elevs = satellite["elev_time"][0]
-        cnos = satellite["cno"][0]
-        elevs = satellite["elevations"][0]
-        az = satellite["azimuths"][0]
-        times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-
-        # below I'm splicing the array when the difference between times in subsequent elements is greater than 10k
-        # this splicing tolerance might have to be changed
-        diff_times = np.diff(times_elevs)
-        indices = np.argwhere(diff_times > 10000).flatten()
-        print(indices)
-        past_index = 0
-        i = 0
-        while i < len(indices):
-            next_index = indices[i]
-            print(next_index)
-            times = times_elevs[past_index:next_index]
-            times = times - times_elevs[past_index+1]
-            if len(times) < 250:
-                past_index = indices[i]
-                i += 1
-                continue
-            plt.scatter(times, cnos[past_index:next_index] + 10*i, label=f"Day {i}", s=0.5)
-            past_index = indices[i]
-            i += 1
-
-        plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
-        plt.legend()
-        plt.title(sat_name)
-        plt.xlim(0, 25000)
-        plt.savefig(self.plot_dir + "overplotted_offset.png")
-
-    def plot_one_d_prof(self, sat_names, with_sim=False):
-        """
-        Plots 1D beam profile in time and angle
-        """
-        fig, axes = plt.subplots()
-
-        for sat_name in sat_names:
-            left_angles_deg, left_powers, right_angles_deg, right_powers = self.get_angles_for_one_d_prof(sat_name, shift=False)
-            axes.scatter(-left_angles_deg, left_powers-40, s=0.5, label=sat_name, c="k")
-            axes.scatter(right_angles_deg, right_powers-40, s=0.5, c="k")
-            power_beam = beam.efield_to_power(inplace=False)
-
-            if with_sim:
-                axes.plot(power_beam.axis2_array * 180 / np.pi, power_beam.data_array[0, 0, -1, :, 0])
-
-                # axes.scatter(beam.axis2_array * 180 / np.pi, beam.data_array[1, 0, 48, :, 0], s=0.5)
-                # axes.scatter(-beam.axis2_array * 180 / np.pi, beam.data_array[1, 0, 48, :, 0], s=0.5)
-            plt.xlim(-90, 90)
-            x = beam.data_array[0, 0, :, 0, 0]
-            print("x: ", x)
-            # plt.close()
-            # cnos = satellite["cno"][0]
-            # satellite = self.all_sat_dict[sat_name]
-            # times_cno = satellite["times"][0]
-            # plt.scatter(times_cno, cnos, c="k", s=0.1)
-            # plt.xlabel(r"${\rm Time ~ [s]}$")
-            # plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
-            # plt.title(sat_name)
-            # plt.savefig(self.plot_dir + sat_name + "_time_indiv.png", bbox_inches='tight')
-        plt.xlabel(r"${\theta \rm ~ [deg]}$")
-        plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
-        plt.legend()
-        plt.title(sat_name[:3])
-        plt.savefig(self.plot_dir + sat_name + "_power_indiv_new.png", bbox_inches='tight', dpi=300)
-
-    @staticmethod
-    def get_bessel_0(ka_sintheta):
-        return special.j0(ka_sintheta)
-
-    @staticmethod
-    def get_bessel_1(ka_sintheta):
-        return special.j1(ka_sintheta)
-
-    @staticmethod
-    def convert_angular_distance_from_center_beam(alt, az):
-        """
-        Finds the angular distance from the beam center for a given alt and az using the dot product (lazy trig).
-        """
-        x_beam = np.cos(D3A_AZ) * np.cos(D3A_ALT)
-        y_beam = np.sin(D3A_AZ) * np.cos(D3A_ALT)
-        z_beam = np.sin(D3A_ALT)
-
-        x_sat = np.cos(az) * np.cos(alt)
-        y_sat = np.sin(az) * np.cos(alt)
-        z_sat = np.sin(alt)
-
-        cos_ang = x_beam*x_sat + y_beam*y_sat + z_beam*z_sat
-        ang = np.arccos(cos_ang)
-        return ang
-
-    @staticmethod
-    def convert_P(C_N, nothing=True):
-        """
-        This function converts the receiver's C/N_0 measurement into a classical power measurement in dBw
-        Convert C/N_0 to power in dBw.
-        """
-        if nothing:
-            return C_N
-        N_sys = 8.5  # dB
-        Tant = 30  # K
-        P = C_N + 10 * np.log10(Tant + 290 * (10 ** (N_sys / 10) - 1)) - 228.6  # last i power
-        return P
-
-    @staticmethod
-    def match_elevs(times_cno, times_elevs, cnos, elevs, az):
-        """
-        Septentrio returns cnos and postiions of different lengths. This function just finds their intersection.
-        :returns intersected times_elevs, cnos, elevs, az
-        """
-        # TODO fix duplicates
-        indices = np.intersect1d(times_elevs, times_cno, return_indices=True)
-        elev_indices = indices[1]
-        cnos_indices = indices[2]
-
-        times_elevs = times_elevs[elev_indices]
-        elevs = elevs[elev_indices]
-        az = az[elev_indices]
-        cnos = cnos[cnos_indices]
-        return times_elevs, cnos, elevs, az
-
-
+# class GetBeamMap(ExtractSBF):
+#     """
+#     This class takes in data directories and creates a beam map.
+#     """
+#     def __init__(self, data_direcs, mask_frequency="1", save_parsed_data_direc="parsed_data", plot_dir="/Users/sabrinaberger/Desktop/beam_paper_plots/", masking=False):
+#         super().__init__(data_direcs=data_direcs, include_elev=True, process=True, mask_frequency=mask_frequency, save_parsed_data_direc=save_parsed_data_direc, masking=masking)
+#         self.plot_dir = plot_dir
+#         self.panel_plot_num = 0 # number of panel plot so we can plot multiple satellites
+#         if self.all_sat_dict != None:
+#             self.get_close_sats()
+#
+#     def print_dictionary(self):
+#         print(self.all_sat_dict)
+#         return
+#
+#     def replace_dictionary(self, dict):
+#         self.all_sat_dict = dict
+#         self.get_close_sats()
+#
+#     def get_close_sats(self, tol_beam=20):
+#         self.close_sat_beams = []
+#
+#         min_diff_az = 100
+#         min_diff_el = 100
+#         min_nam = ""
+#         for key in self.all_sat_dict:
+#             if key is not None:
+#                 satellite = self.all_sat_dict[key]
+#                 times_cno = satellite["times"][0] # SECONDS
+#                 times_elevs = satellite["elev_time"][0] # SECONDS
+#                 cnos = satellite["cno"][0]
+#                 elevs = satellite["elevations"][0]
+#                 az = satellite["azimuths"][0]
+#                 az = self.shift_az(az) # shifting azimuth
+#                 times_elevs, cnos, elevs, az = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#                 elev_beam = np.full(len(elevs), D3A_ALT_deg)
+#                 diff_elev = np.abs(elevs - elev_beam)
+#                 az_beam = np.full(len(az), D3A_AZ_deg)
+#                 diff_az = np.abs(az - az_beam)
+#
+#                 # if min_diff_az > min(diff_az) and min_diff_el > min(diff_elev):
+#                 #     min_diff_az = min(diff_az)
+#                 #     min_diff_el = min(diff_elev)
+#                 #     min_nam = key
+#                 # Checking if current satellite passes close to center of beam
+#                 if (diff_az < tol_beam).any() and (diff_elev < tol_beam).any():
+#                     print(f"{key} passes close to center of beam.")
+#                     # min_diff_az = min(diff_az)
+#                     # min_diff_el = min(diff_elev)
+#                     # print(f"min diff az: {min_diff_az}")
+#                     # print(f"min diff elev: {min_diff_el}")
+#
+#                     self.close_sat_beams.append(key)
+#                 else:  # not including satellites that do NOT pass close to beam center
+#                     continue
+#         print(f"Total number of near beam satellites is {len(self.close_sat_beams)}.")
+#
+#     def get_min_max(self, arrs):
+#         arr_concatenated = np.concatenate(arrs, axis=0)
+#         min_arr, max_arr = arr_concatenated.min(), arr_concatenated.max()
+#         return min_arr, max_arr
+#
+#     def make_healpix_plot(self, all_sat, plot_title, sat_list=[], filename="heal_pix_all_sat.png"):
+#         # Create synthetic HEALPix data
+#         if all_sat:
+#             sats_to_plot = self.all_sat_dict
+#         else:
+#             sats_to_plot = sat_list
+#         # sorry to not vectorize the below yikes
+#         powers_arr = []
+#         az_arr = []
+#         alt_arr = []
+#         times_arr = []
+#
+#         # below in this for loop I'm binning each az,alt power
+#         for i, key in enumerate(sats_to_plot):
+#             satellite = self.all_sat_dict[key]
+#             for i, sat_typ in enumerate(satellite['sig_type'][0]): # checking to make sure only using L1
+#                 if sat_typ is not None:
+#                     if "L1" not in sat_typ:
+#                         print(sat_typ)
+#                         print("Not using L1")
+#                         exit()
+#             cnos = satellite["cno"][0]
+#             times_cno = satellite["times"][0]
+#             times_elevs = satellite["elev_time"][0]
+#             elevs = satellite["elevations"][0]
+#             az = satellite["azimuths"][0]
+#
+#             times_elevs, cnos_matched, elevs_matched, az_matched = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#             powers_arr.append(cnos_matched)
+#             alt_arr.append(elevs_matched)
+#             az_arr.append(az_matched)
+#             times_elevs
+#
+#         # flattening ragged numpy arrays
+#         powers_arr = np.concatenate(powers_arr)
+#         alt_arr = np.concatenate(alt_arr)
+#         # shifting elevs
+#         alt_arr = 90 - alt_arr
+#         az_arr = np.concatenate(az_arr)
+#
+#         np.save("az_arr.npy", az_arr)
+#         np.save("alt_arr.npy", alt_arr)
+#         np.save("powers_arr.npy", powers_arr)
+#         # Define HEALPix parameters
+#         nside = 5  # HEALPix resolution parameter
+#         npix = healpy.nside2npix(nside)
+#
+#         print("Shifted azimuths 180 degrees...")
+#         az_arr = self.shift_az(az_arr)
+#
+#         # Convert RA/Dec to radians
+#         az_rad = np.radians(az_arr)
+#         alt_rad = np.radians(alt_arr)  # Convert altitude to declination
+#
+#         # Convert RA/Dec to HEALPix pixel indices (vectorized)
+#         pix_indices = healpy.ang2pix(nside, alt_rad, az_rad)
+#
+#         # Initialize a HEALPix map to hold the accumulated power values
+#         healpix_map = np.zeros(npix)
+#
+#         # Accumulate power values in the HEALPix map using NumPy's accumarray
+#         np.add.at(healpix_map, pix_indices, powers_arr)
+#
+#         # # Convert RA/Dec to HEALPix pixel indices and accumulate power values
+#         # for ra, dec, power in zip(az_arr, alt_arr, powers_arr):
+#         #     pix = healpy.ang2pix(nside, np.radians(alt_arr), np.radians(az_arr))  # Convert to radians
+#         #     healpix_map[pix] += power  # Accumulate power values
+#
+#         # Healpix map to Mollweide projection
+#         healpy.orthview(healpix_map,  coord='C', cmap='viridis', norm='hist', half_sky=True) #"C" is celestial coordinates
+#         # Display the colorbar
+#         # plt.colorbar(label='Accumulated Power')
+#         # Show the plot
+#         plt.savefig(self.plot_dir + "healpy.png", dpi=300)
+#
+#     def make_plot(self, all_sat, plot_title, sat_list=[], show_power=False, filename="all_sat.png"):
+#         """
+#         Plot all the satellites or a subset
+#         param: all_sat - boolean when true all satellites are plotted, when false, looks for satellite in sat_list
+#         param: plot_title - title above plot to be generated
+#         param: direc - directory where to save the plot
+#         param: filename - name of plot you're making
+#         """
+#         if all_sat:
+#             sats_to_plot = self.all_sat_dict
+#         else:
+#             sats_to_plot = sat_list
+#
+#         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+#
+#         # sorry to not vectorize the below yikes
+#         powers_arr = []
+#         az_arr = []
+#         alt_arr = []
+#
+#         # below in this for loop I'm binning each az,alt power
+#         for i, key in enumerate(sats_to_plot):
+#             satellite = self.all_sat_dict[key]
+#             for i, sat_typ in enumerate(satellite['sig_type'][0]): # checking to make sure only using L1
+#                 if sat_typ is not None:
+#                     if "L1" not in sat_typ:
+#                         print(sat_typ)
+#                         print("Not using L1")
+#                         exit()
+#             cnos = satellite["cno"][0]
+#             times_cno = satellite["times"][0]
+#             times_elevs = satellite["elev_time"][0]
+#             elevs = satellite["elevations"][0]
+#             az = satellite["azimuths"][0]
+#
+#             if show_power:
+#                 times_elevs, cnos_matched, elevs_matched, az_matched = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#                 powers_arr.append(cnos_matched)
+#                 alt_arr.append(elevs_matched)
+#                 az_arr.append(az_matched)
+#             else: # just plotting tracks in black
+#                 ax.scatter(np.deg2rad(az), 90 - elevs, s=0.01, c="k")
+#                 print(np.deg2rad(az[:2]), elevs[:2])
+#
+#         if show_power:
+#             # flattening ragged numpy arrays
+#             powers_arr = np.concatenate(powers_arr)
+#             alt_arr = np.concatenate(alt_arr)
+#             # shifting elevs
+#             alt_arr = 90 - alt_arr
+#             az_arr = np.concatenate(az_arr)
+#             # 2D binning getting maximums, using ChatGPT to help accelerate generating this plot
+#             # Step 1: Define bin edges for azimuth and altitude (in degrees)
+#             alt_bins = np.linspace(70, 90, int(100))  # Altitude bins (0 to 90 degrees), binwidth = 0.1 deg
+#             az_bins = np.linspace(0, 360, int(100))  # Azimuth bins (-180 to 180 degrees), binwidth = 0.1 deg
+#
+#             # Step 2: Perform 2D binning using the average of `powers_arr` for each bin
+#             peaks, az_edges, alt_edges, binnumber = binned_statistic_2d(
+#                 az_arr, alt_arr, powers_arr, statistic='max', bins=[az_bins, alt_bins]
+#             )
+#
+#             # Step 3: Convert bin edges to centers for plotting
+#             az_centers = (az_edges[:-1] + az_edges[1:]) / 2  # Convert azimuth edges to bin centers
+#             alt_centers = (alt_edges[:-1] + alt_edges[1:]) / 2  # Convert altitude edges to bin centers
+#
+#             # Step 4: Convert azimuth and altitude to radians for polar plotting
+#             azimuth_bin_centers, altitude_bin_centers = np.meshgrid(np.radians(az_centers), alt_centers)
+#
+#             # Step 5: Create the polar plot with pcolormesh
+#             # pcolormesh using binned azimuth and altitude
+#             c = ax.pcolormesh(azimuth_bin_centers, altitude_bin_centers, peaks.T[:-1, :-1], cmap='viridis', shading="flat")
+#             cbar = fig.colorbar(c, ax=ax)
+#             cbar.set_label(r'$C/N_0$ [db-Hz]', rotation=270, labelpad=15)
+#
+#
+#         # Define the center of the circle
+#         r_center = np.radians(90 - D3A_ALT_deg)  # altitude (radius)
+#         theta_center = np.radians(D3A_AZ_deg)  # azimuth (angle in radians, converted from degrees)
+#
+#         # Convert polar coordinates (r_center, theta_center) to Cartesian coordinates
+#         x_center = r_center * np.cos(theta_center)
+#         y_center = r_center * np.sin(theta_center)
+#
+#         # Define the radius of the circle
+#         circle_radius = 100*1.22 * 0.2 / 6
+#
+#         # Create the circle in Cartesian coordinates
+#         circle = plt.Circle((x_center, y_center), circle_radius, fill=False, color='black',
+#                             transform=ax.transData._b, linewidth=1)
+#         # Add the circle to the plot
+#         ax.add_artist(circle)
+#
+#         ax.set_theta_zero_location('E')
+#         ax.set_title(plot_title)
+#         # convert circle_radius to polar plot limits
+#         ax.set_yticks(range(0, 90 + 10, 10))  # Define the yticks
+#         yLabel = ['90', '80', '70', '', '', '', '', '', '', '']
+#         ax.set_ylim(70, 90)  # This would make the center at 90 degrees
+#
+#         ax.set_yticklabels(yLabel)
+#         plt.savefig(self.plot_dir + filename, bbox_inches='tight', dpi=300)
+#         plt.close()
+#
+#     def shift_az(self, az_deg):
+#         """
+#         :param az_deg:  azimuth in degrees between 0 and 360 degrees
+#         :return: shifted azimuth in degrees between -180 and 180 degrees
+#         """
+#         az_deg = np.asarray([-(360 - x) if x > 180 else x for x in az_deg])
+#         return az_deg
+#
+#
+#     def save_particular_sat(self, sat_name):
+#         satellite = self.all_sat_dict[sat_name]
+#         elevs = satellite["elevations"][0]
+#         az = satellite["azimuths"][0]
+#         cnos = satellite["cno"][0]
+#         times_cno = satellite["times"][0]
+#         times_elevs = satellite["elev_time"][0]
+#         times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#
+#         np.save(f"{sat_name}_times.npy", times_elevs)
+#         np.save(f"{sat_name}_cnos.npy", cnos)
+#         np.save(f"{sat_name}_elev.npy", elevs_deg)
+#         np.save(f"{sat_name}_az.npy", az_deg)
+#
+#     def mask_array_for_one_d(self, az, elevs, cnos, mask, times):
+#         """angles in radians"""
+#         az = az[mask]
+#         elevs = elevs[mask]
+#         cnos = cnos[mask]
+#         times = times[mask]
+#         angles_rad = self.convert_angular_distance_from_center_beam(elevs, az)
+#         angles_deg = angles_rad * 180 / np.pi
+#         return angles_deg, cnos, times
+#
+#     def get_angles_for_one_d_prof(self, sat_name, shift=True):
+#         """
+#         Gives you a 1D profile for a satellite as a function of angular distance from beam and match times for
+#         elevations and CNOs
+#         :param sat_name - name of satellite
+#         :param shift - whether or not to shift azimuths with shift_az
+#
+#         :return angles_deg, powers - theta and power of a one d beam profile for a given satellite
+#         """
+#         satellite = self.all_sat_dict[sat_name]
+#         elevs = satellite["elevations"][0]
+#         az = satellite["azimuths"][0]
+#         cnos = satellite["cno"][0]
+#         times_cno = satellite["times"][0]
+#         times_elevs = satellite["elev_time"][0]
+#         times_matched, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#         is_sorted = lambda arr: np.all(arr[:-1] <= arr[1:])
+#         print("Matched times is sorted" if is_sorted(times_matched) else "Array is not sorted")
+#         if shift:  # shift > 180 to negative values
+#             print("Shifted azimuths...")
+#             az_deg = self.shift_az(az_deg)
+#
+#         elevs = elevs_deg * np.pi / 180
+#         az = az_deg * np.pi / 180
+#
+#         ## REMOVE CNOS with values that are the same within threshold of 1000s
+#
+#
+#         # TAKING ONLY ONE (ALT, AZ) & TIMESTAMP
+#         unique_cnos, unique_indices_cnos = np.unique(cnos, return_index=True)
+#         unique_times, unique_indices_times = np.unique(times_matched, return_index=True)
+#         unique_az, unique_indices_az = np.unique(az, return_index=True)
+#         unique_elevs, unique_indices_elevs = np.unique(elevs, return_index=True)
+#         # arrays = [unique_indices_az, unique_indices_times]
+#
+#         # unique_location_indices = reduce(np.intersect1d, arrays) # applies intersect consecutively
+#         # unique_location_indices = unique_indices_times
+#         # print(np.sum(np.isin(unique_indices_cnos, unique_location_indices)))
+#
+#         # times_matched, az, elevs, cnos, elevs_deg, az_deg = times_matched[unique_location_indices], az[unique_location_indices], elevs[unique_location_indices], cnos[unique_location_indices], elevs_deg[unique_location_indices], az_deg[unique_location_indices]
+#
+#         # masking
+#         right_mask = az_deg > D3A_AZ_deg  # right
+#         left_mask = az_deg < D3A_AZ_deg  # left
+#
+#         # this takes in radians
+#         right_angles_deg, right_powers, right_times = self.mask_array_for_one_d(az, elevs, cnos, right_mask, times_matched)
+#         left_angles_deg, left_powers, left_times = self.mask_array_for_one_d(az, elevs, cnos, left_mask, times_matched)
+#
+#         print("right times is sorted" if is_sorted(right_times) else "Array is not sorted")
+#         print("left times is sorted" if is_sorted(left_times) else "Array is not sorted")
+#
+#         all_angles_deg = np.concatenate([-left_angles_deg, right_angles_deg])
+#         all_powers = np.concatenate([left_powers, right_powers])
+#         all_times = np.concatenate([left_times, right_times])
+#
+#         print("all times is sorted" if is_sorted(all_times) else "Array is not sorted")
+#
+#         # Get the indices that would sort the 'times' array
+#         sorted_indices = np.argsort(all_times)
+#
+#         # Sort all arrays based on 'times'
+#         all_angles_deg = all_angles_deg[sorted_indices]
+#         all_powers = all_powers[sorted_indices]
+#         all_times = all_times[sorted_indices]
+#
+#         split_all_times, split_all_powers, split_all_angles_deg = self.split_sat(all_times, all_powers, all_angles_deg, sat_name=sat_name)
+#
+#
+#         return split_all_times, split_all_powers, split_all_angles_deg, all_times, all_powers, all_angles_deg
+#
+#     def convert_C_n_to_SNR_linear(self, c_n, bw=2e6):
+#         # assuming nominal L1 bandwidth of 2Mhz
+#         c_n = np.asarray(c_n)
+#         bw = np.log10(bw)
+#         s_n_db = c_n - bw
+#         s_n_linear = 10**(s_n_db/10)
+#         return s_n_linear
+#
+#     def convert_SNR_linear_C_n(self, SNR_linear, bw=2e6):
+#         # assuming nominal L1 bandwidth of 2Mhz
+#         s_n_db = 10 * np.log10(SNR_linear)
+#         bw = np.log10(bw)
+#         c_n = s_n_db + bw
+#         return c_n
+#
+#     def within_threshold(self, arr, threshold=2):
+#         # Ensure arr is a NumPy array
+#         arr = np.asarray(arr)
+#
+#         # If arr is a scalar or has only one element, return True
+#         if arr.ndim == 0 or len(arr) <= 1:
+#             return True
+#
+#         # Compute pairwise absolute differences
+#         diff_matrix = np.abs(arr[:, None] - arr)
+#         # Check if all differences are within the threshold
+#         return np.all(diff_matrix >= threshold)
+#
+#     # def average_C_N_0(self, grouped_c_n, grouped_angles, decimals_round=0, min_passes_for_average=2):
+#     #     grouped_angles_round = [np.round(arr, decimals=decimals_round) for arr in grouped_angles] # rounded decimals
+#     #
+#     #     unique_elements_per_array = [np.unique(arr) for arr in grouped_angles_round]
+#     #     unique_elements_per_array = np.concatenate(unique_elements_per_array).flatten()
+#     #     unique_angles_deg = np.unique(unique_elements_per_array)
+#     #     c_n_angle = np.empty(len(unique_angles_deg))
+#     #     c_n_angle_min =  np.empty(len(unique_angles_deg)) # min for degree
+#     #     c_n_angle_max =  np.empty(len(unique_angles_deg)) # min for degree
+#     #
+#     #     c_n_angle_all = [] # all C_Ns in group
+#     #     std_angle = np.empty(len(unique_angles_deg))
+#     #     snr_angle = np.empty(len(unique_angles_deg))
+#     #     std_from_linear = np.empty(len(unique_angles_deg))
+#     #     counts = np.empty(len(unique_angles_deg))
+#     #
+#     #     # for i, angle in enumerate(unique_angles_deg):
+#     #     #     c_n_curr_angle = []
+#     #     #     for y in range(len(grouped_c_n)):
+#     #     #         # group unique indices
+#     #     #         mask = grouped_angles_round[y] == angle
+#     #     #         c_n = grouped_c_n[y][mask]
+#     #     #         if len(c_n) < 1:  # empty list
+#     #     #             continue
+#     #     #         c_n_curr_angle.append(c_n)
+#     #     #
+#     #     #     if len(c_n_curr_angle) < min_passes_for_average:
+#     #     #         # c_n_curr_angle.append([0])
+#     #     #         c_n_angle[i] = np.nan
+#     #     #         std_angle[i] = np.nan
+#     #     #         snr_angle[i] = np.nan
+#     #     #         std_from_linear[i] = np.nan
+#     #     #         c_n_angle_min[i] = np.nan
+#     #     #         c_n_angle_max[i] = np.nan
+#     #     #         c_n_angle_all.append([])
+#     #     #         continue
+#     #     #     ## average cn and std
+#     #     #     counts[i] = len(c_n_curr_angle)
+#     #     #     c_n_angle_all.append(c_n_curr_angle) # saving all C_Ns
+#     #     #
+#     #     #     c_n_curr_angle = [item for sublist in c_n_curr_angle for item in sublist] # flattening ragged list
+#     #     #     c_n_angle_min[i] = np.min(c_n_curr_angle) # getting min
+#     #     #     c_n_angle_max[i] = np.max(c_n_curr_angle) # getting max
+#     #     #     c_n_angle[i] = np.mean(c_n_curr_angle) # mean of c_n_angle in logspace
+#     #     #     std_angle[i] = np.std(c_n_curr_angle) # weird std of c_n_angle in logspace
+#     #     #
+#     #     #     ## average linear SNR
+#     #     #     s_n_curr_angle = self.convert_C_n_to_SNR_linear(c_n_curr_angle) # convert from C_n to linear SNR
+#     #     #     # mean_s_n_curr_angle = np./(s_n_curr_angle) # take mean of SNR
+#     #     #     snr_angle[i] = mean_s_n_curr_angle # mean of SNR in linear space
+#     #     #
+#     #     #     ## linear SNR standard deviation
+#     #     #     s_n_curr_angle_std = np.std(s_n_curr_angle)
+#     #     #     if s_n_curr_angle_std == 0:
+#     #     #         s_n_curr_angle_std = 1
+#     #     #     s_n_curr_angle_std = 10 * np.log10(s_n_curr_angle_std) # convert back into db
+#     #     #     std_from_linear[i] = s_n_curr_angle_std # convert back to log space
+#     #     return unique_angles_deg, c_n_angle, c_n_angle_all, std_angle, snr_angle, std_from_linear, counts, c_n_angle_max, c_n_angle_min
+#
+#
+#     def split_sat(self, times, powers, thetas, sat_name):
+#         diff_times = np.diff(times) # getting difference between adjacent elements
+#         is_sorted = lambda arr: np.all(arr[:-1] <= arr[1:])
+#         assert is_sorted(times) # ensuring time is sorted so chunking works
+#
+#         gap_threshold = np.max(diff_times) * 0.7  # threshold for splitting chunks at 90% maximum
+#
+#         chunk_indices = np.where(diff_times > gap_threshold)[0] + 1
+#         print("CHECK OUTPLOT PLOTS TO MAKE SURE CHUNKING IS HAPPENING CORRECTLY")
+#         time_chunks = np.split(times, chunk_indices)
+#         theta_chunks = np.split(thetas, chunk_indices)
+#         power_chunks = np.split(powers, chunk_indices)
+#
+#         if sat_name == "E15": # just keeping chunks but saving by eye from plots
+#             time_chunks = [time_chunks[1]]
+#             theta_chunks = [theta_chunks[1]]
+#             power_chunks = [power_chunks[1]]
+#
+#         if sat_name == "E36": # just keeping chunks but saving by eye from plots
+#             time_chunks = [time_chunks[1]]
+#             theta_chunks = [theta_chunks[1]]
+#             power_chunks = [power_chunks[1]]
+#
+#         # Plot each chunk with a different color
+#         plt.close()
+#         plt.figure(figsize=(10, 6))
+#         colors = plt.cm.viridis(np.linspace(0, 1, len(time_chunks)))  # Using a colormap for colors
+#         print(sat_name)
+#         print(len(time_chunks))
+#         for i, (t_chunk, theta_chunk) in enumerate(zip(time_chunks, theta_chunks)):
+#             print(f'Chunk {i + 1}')
+#             plt.scatter(t_chunk, theta_chunk, color=colors[i], label=f'Chunk {i + 1}')
+#
+#         # Label the plot
+#         plt.xlabel('Times')
+#         plt.ylabel('Thetas')
+#         plt.title('Color-Coded Chunks of Data')
+#         plt.legend()
+#         plt.savefig(f"chunks/{sat_name}_chunking.png")
+#
+#         return time_chunks, power_chunks, theta_chunks
+#
+#
+#     def plot_panel_sats(self, rows=6, cols=3, start=0, end=19, chosen=True, figsize=(8, 12), offset=True,
+#                         want_theta=False, want_time=False, rms=False, airy_disk=True, create_latex_table=True):
+#         var = 0
+#         print("num close_sats", len(self.close_sat_beams))
+#         if chosen:
+#             close_sat_beams = self.chosen_list
+#         else:
+#             close_sat_beams = self.close_sat_beams[start:end] # local to function version, NO SELF
+#
+#         sat_names = []
+#         peak_sigmas = []
+#         peak_powers = []
+#         sigma_at_max = []
+#         counts_min_sigmas = []
+#         min_max_power_range = []
+#         diff = []
+#         diff_at_max = []
+#         fig, axes = plt.subplots(rows, cols, figsize=figsize)
+#         # Create a colormap to match the theta plot
+#
+#         for i in range(rows):
+#             for j in range(cols):
+#                 sat_name = close_sat_beams[var]
+#                 times_grouped, powers_grouped, angles_grouped, _, _, _ = self.get_angles_for_one_d_prof(sat_name,
+#                                                                                                         shift=True)
+#                 if create_latex_table:
+#                     decimals_round = 100 # NO BINNING ?
+#                 else:
+#                     decimals_round = 1
+#                 unique_angles_deg, avg_powers, all_powers, avg_sigmas, snr_angle, std_from_linear, counts, power_angle_max, power_angle_min = (
+#                     self.average_C_N_0(powers_grouped, angles_grouped, decimals_round=decimals_round, min_passes_for_average=2))
+#                 cmap = cm.get_cmap("viridis", 6)  # Specify 6 distinct colors
+#                 colors = [cmap(i) for i in range(6)]  # Extract colors for each pass
+#                 if want_theta:
+#                     if not np.all(np.isnan(avg_powers)):
+#                         sat_names.append(sat_name)
+#                         peak_sigmas.append(np.nanmax(avg_sigmas))
+#                         peak_powers.append(np.nanmax(avg_powers))
+#                         index = np.nanargmax(avg_powers)
+#                         sigma_at_max.append(avg_sigmas[index])
+#                         print()
+#                         diff_at_max.append(power_angle_max[index] - power_angle_min[index])
+#                         diff_all = []
+#                         for z, power_chunk in enumerate(all_powers):
+#                             if len(power_chunk) > 0:
+#                                 power_chunk_flattened = np.concatenate(power_chunk).ravel()
+#                                 diff_curr = np.nanmax(power_chunk_flattened)-np.nanmin(power_chunk_flattened)
+#                                 diff_all.append(diff_curr)
+#                         # print("all_powers_flattened_index")
+#                         # print(all_powers_flattened_index)
+#                         # min_max_power_range.append((min(all_powers_flattened_index), max(all_powers_flattened_index)))
+#                         diff.append(min(diff_all))
+#                         print()
+#                     # Define colormap and normalization
+#                     # Convert to asymmetric errors
+#                     # lower_errors = np.where(avg_sigmas < 0, np.abs(avg_sigmas), 0)  # Positive values (lower bounds)
+#                     # upper_errors = np.where(avg_sigmas > 0, avg_sigmas, 0)  # Negative values (upper bounds)
+#
+#                     # Combine into asymmetric yerr
+#                     max_min_powers = (avg_powers-power_angle_min, power_angle_max-avg_powers)
+#                     # Create the scatter plot with error bars
+#
+#                     sc_color = axes[i][j].scatter(
+#                         unique_angles_deg, avg_powers,
+#                         label=sat_name, s=5, cmap=cmap, norm=Normalize(vmin=1, vmax=6),
+#                         c=counts, alpha=0.9)
+#
+#                     axes[i][j].errorbar(
+#                         unique_angles_deg,  # X data
+#                         avg_powers,  # Y data
+#                         yerr=max_min_powers,  # Error values
+#                         label=sat_name,  # Label for the plot
+#                         fmt='none',  # No markers for data points
+#                         capsize=0,  # No caps on the error bars,
+#                         zorder=-100,
+#                         ecolor='#D3D3D3'
+#                     )
+#                     # Add colorbar
+#                     cbar = plt.colorbar(sc_color, ax=axes[i][j])
+#                     cbar.set_label('Counts')
+#                     # Set colorbar ticks to integers between 0 and 6
+#                     cbar.set_ticks([1, 2, 3, 4, 5, 6])
+#                     cbar.set_ticklabels([1, 2, 3, 4, 5, 6])
+#
+#                     sat_constellation = self.all_sat_dict[sat_name]['sig_type'][0][0]
+#
+#                     if "L1" in sat_constellation:
+#                         obs_freq = 1575e6 #L1 GPS
+#                     else:
+#                         print("OBS FREQUENCY UNKNOWN.")
+#
+#                     if airy_disk:
+#                         theta, intensity = self.airy_disk_pattern(3e8/obs_freq, 3, max_rad=5 * np.pi/180, max_I=np.max(snr_angle))
+#                         theta *= 180.0 / np.pi
+#                         axes[i][j].plot(theta, 10 * np.log10(intensity), c="k", label="Airy disk", alpha=0.5)
+#                     axes[i][j].set_xlabel(r"${\theta \rm ~ [deg]}$")
+#                     axes[i][j].set_ylabel(r'Binned ${C/N_0 \rm ~ [dB-Hz]}$')
+#                     axes[i][j].set_title(rf"${sat_name}$")
+#                     axes[i][j].set_xlim((-90, 90))
+#                     axes[i][j].set_ylim((20, 65))
+#                 elif want_time:
+#                     pass_num = 0
+#                     for times, powers in zip(times_grouped, powers_grouped):
+#                         if pass_num > 5 or len(times) < 500:
+#                             continue
+#                         times -= np.min(times)
+#                         times /= 3600
+#                         if offset:
+#                             print(pass_num)
+#                             k = pass_num + 1 # avoiding 0
+#                             axes[i][j].scatter(times, powers + 20 * k, label=f"Pass {k}", c=colors[int(pass_num)], s=0.5)
+#                         else:
+#                             axes[i][j].scatter(times, powers, c="k", s=0.05)
+#                         pass_num += 1
+#                     # Retrieve handles and labels from the scatter plot
+#                     handles, labels = axes[i][j].get_legend_handles_labels()
+#
+#                     # Create a new legend with increased marker sizes
+#                     axes[i][j].legend(handles, labels, markerscale=5, loc='upper right')
+#                     axes[i][j].set_xlabel(r'Time [hr]')
+#                     axes[i][j].set_ylabel(r'Offset ${C/N_0 \rm ~ [dB-Hz]}$')
+#                     axes[i][j].set_title(rf"${sat_name}$")
+#                     # get_max_times = np.concatenate(times_grouped) / 3600
+#                     # axes[i][j].set_xlim((0, np.max(get_max_times)))
+#                 var += 1
+#         if rms:
+#             fig.savefig(self.plot_dir + f"RMS_panel_{self.panel_plot_num}.png", dpi=300)
+#         else:
+#             if want_time:
+#                 fig.tight_layout()
+#                 fig.savefig(self.plot_dir + f"time_panel_{self.panel_plot_num}.png", dpi=300)
+#                 plt.close(fig)
+#             elif want_theta:
+#                 fig.tight_layout()
+#                 fig.savefig(self.plot_dir + f"theta_panel_{self.panel_plot_num}.png", dpi=300)
+#                 plt.close(fig)
+#             else:
+#                 print("You didn't specify theta, time, or RMS.")
+#         self.panel_plot_num += 1
+#
+#         if create_latex_table:
+#             # Start constructing the LaTeX table string
+#             latex_table = r"\begin{table}[ht]\n\centering\n\begin{tabular}{|c|c|c|c|c|}\n\hline\n"
+#             latex_table += "Satellite & Max - Min $C/N_0$ [db-Hz] & Peak $C/N_0$  [db-Hz] & $\sigma$ at Peak $C/N_0$  [db-Hz] & Max $\sigma$  [db-Hz] \\\\ \\hline\n"
+#
+#             # Single loop to fill in table rows
+#             for idx, (sat, diff, sigma_max, max_sigma, peak_power) in enumerate(zip(sat_names, diff_all, sigma_at_max, peak_sigmas, peak_powers)):
+#                 latex_table += f"{sat} & {diff:.2f} & {peak_power:.2f} & {sigma_max:.2f}& {max_sigma:.2f} \\\\ \\hline\n"
+#
+#             # Finish the LaTeX table
+#             latex_table += r"\end{tabular}\n\caption{Satellite Data Table}\n\end{table}"
+#
+#             # Output LaTeX table string
+#             print(latex_table)
+#         print(counts_min_sigmas)
+#         print(min_max_power_range)
+#         print(diff)
+#
+#         # plt.close()
+#         # Create the plot
+#         plt.figure(figsize=(8, 5))
+#         plt.bar(sat_names, peak_sigmas, color='skyblue')
+#
+#         # Turn satellite names horizontally
+#         plt.xticks(rotation=90)
+#
+#         # Labels and title
+#         plt.xlabel("Satellite Name")
+#         plt.ylabel(r"Maximum $\sigma$ Value")
+#         # Show plot
+#         plt.tight_layout()  # Adjusts plot to fit into figure area
+#         plt.savefig(self.plot_dir + "max_sigmas.png")
+#
+#     ## AIRY DISK
+#
+#     def airy_disk_pattern(self, wavelength, aperture_radius, max_I, max_rad=np.pi/4):
+#         # Calculate wave number
+#         k = 2 * np.pi / wavelength
+#
+#         theta = np.linspace(-max_rad, max_rad, int(1e4))
+#
+#         # Calculate intensity pattern
+#         intensity = max_I * (2 * special.j1(k * aperture_radius * np.sin(theta)) / (
+#                 k * aperture_radius * np.sin(theta))) ** 2
+#         intensity[theta == 0] = max_I  # Handle the singularity at theta = 0
+#
+#         return theta, intensity
+#
+#     def compare_sats(self, list_sats):
+#         for sat in list_sats:
+#             satellite = self.all_sat_dict[sat]
+#             elevs = satellite["elevations"][0]
+#             az = satellite["azimuths"][0]
+#             cnos = satellite["cno"][0]
+#             times_cno = satellite["times"][0]
+#             times_elevs = satellite["elev_time"][0]
+#             times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#             plt.scatter(times_elevs, cnos, label=sat, s=0.1)
+#             plt.title(f"L{self.mask_frequency}")
+#         plt.legend()
+#         plt.savefig(f"../plots/compare_sats_{self.mask_frequency}.png", dpi=400)
+#
+#     def overplot_days(self, sat_name):
+#         satellite = self.all_sat_dict[sat_name]
+#         times_cno = satellite["times"][0]
+#         times_elevs = satellite["elev_time"][0]
+#         cnos = satellite["cno"][0]
+#         elevs = satellite["elevations"][0]
+#         az = satellite["azimuths"][0]
+#         times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
+#
+#         # below I'm splicing the array when the difference between times in subsequent elements is greater than 10k
+#         # this splicing tolerance might have to be changed
+#         diff_times = np.diff(times_elevs)
+#         indices = np.argwhere(diff_times > 10000).flatten()
+#         print(indices)
+#         past_index = 0
+#         i = 0
+#         while i < len(indices):
+#             next_index = indices[i]
+#             print(next_index)
+#             times = times_elevs[past_index:next_index]
+#             times = times - times_elevs[past_index+1]
+#             if len(times) < 250:
+#                 past_index = indices[i]
+#                 i += 1
+#                 continue
+#             plt.scatter(times, cnos[past_index:next_index] + 10*i, label=f"Day {i}", s=0.5)
+#             past_index = indices[i]
+#             i += 1
+#
+#         plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+#         plt.legend()
+#         plt.title(sat_name)
+#         plt.xlim(0, 25000)
+#         plt.savefig(self.plot_dir + "overplotted_offset.png")
+#
+#     def plot_one_d_prof(self, sat_names, with_sim=False):
+#         """
+#         Plots 1D beam profile in time and angle
+#         """
+#         fig, axes = plt.subplots()
+#
+#         for sat_name in sat_names:
+#             split_all_times, split_all_powers, split_all_angles_deg, all_times, all_powers, all_angles_deg = self.get_angles_for_one_d_prof(sat_name, shift=False)
+#             axes.scatter(all_angles_deg, all_powers, s=0.5, label=sat_name, c="k")
+#
+#             plt.xlim(-90, 90)
+#             # plt.close()
+#             # cnos = satellite["cno"][0]
+#             # satellite = self.all_sat_dict[sat_name]
+#             # times_cno = satellite["times"][0]
+#             # plt.scatter(times_cno, cnos, c="k", s=0.1)
+#             # plt.xlabel(r"${\rm Time ~ [s]}$")
+#             # plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+#             # plt.title(sat_name)
+#             # plt.savefig(self.plot_dir + sat_name + "_time_indiv.png", bbox_inches='tight')
+#         plt.xlabel(r"${\theta \rm ~ [deg]}$")
+#         plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
+#         plt.legend()
+#         plt.title(sat_name[:3])
+#         plt.savefig(self.plot_dir + sat_name + "_power_indiv_new.png", bbox_inches='tight', dpi=300)
+#
+#     @staticmethod
+#     def get_bessel_0(ka_sintheta):
+#         return special.j0(ka_sintheta)
+#
+#     @staticmethod
+#     def get_bessel_1(ka_sintheta):
+#         return special.j1(ka_sintheta)
+#
+#     @staticmethod
+#     def convert_angular_distance_from_center_beam(alt, az):
+#         """
+#         Finds the angular distance from the beam center for a given alt and az using the dot product (lazy trig).
+#         """
+#         x_beam = np.cos(D3A_AZ) * np.cos(D3A_ALT)
+#         y_beam = np.sin(D3A_AZ) * np.cos(D3A_ALT)
+#         z_beam = np.sin(D3A_ALT)
+#
+#         x_sat = np.cos(az) * np.cos(alt)
+#         y_sat = np.sin(az) * np.cos(alt)
+#         z_sat = np.sin(alt)
+#
+#         cos_ang = x_beam*x_sat + y_beam*y_sat + z_beam*z_sat
+#         ang = np.arccos(cos_ang)
+#         return ang
+#
+#     @staticmethod
+#     def convert_P(C_N, nothing=True):
+#         """
+#         This function converts the receiver's C/N_0 measurement into a classical power measurement in dBw
+#         Convert C/N_0 to power in dBw.
+#         """
+#         if nothing:
+#             return C_N
+#         N_sys = 8.5  # dB
+#         Tant = 30  # K
+#         P = C_N + 10 * np.log10(Tant + 290 * (10 ** (N_sys / 10) - 1)) - 228.6  # last i power
+#         return P
+#
+#
+#     @staticmethod
+#     def match_elevs(times_cno, times_elevs, cnos, elevs, az):
+#         """
+#         Septentrio returns cnos and postiions of different lengths. This function just finds their intersection.
+#         :returns intersected times_elevs, cnos, elevs, az
+#         """
+#
+#         is_sorted = lambda arr: np.all(arr[:-1] <= arr[1:])
+#         # assert(is_sorted(times_elevs))
+#         # assert(is_sorted(times_cno))
+#
+#         indices = np.intersect1d(times_elevs, times_cno, return_indices=True)
+#         elev_indices = indices[1]
+#         cnos_indices = indices[2]
+#
+#         times_elevs = times_elevs[elev_indices]
+#         elevs = elevs[elev_indices]
+#         az = az[elev_indices]
+#         cnos = cnos[cnos_indices]
+#         return times_elevs, cnos, elevs, az
 
 # initial data run
 # days = ["June14_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_satellite_dict_all", "June_16_port_C2_GNSS_part2_satellite_dict_all"]
@@ -710,14 +863,9 @@ if __name__ == "__main__":
 
         good_sats = ["G04", "G07", "G10", "G23", "G29", "G30", "E36", "E15"]
         beam_map.chosen_list = good_sats
-        beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=True, figsize=(8,12))
-        # beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=True, figsize=(8,12), rms=True, offset=False)
-        beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_theta=True, figsize=(8,12), rms=False, offset=False)
 
-        # beam_map.plot_panel_sats(start=8, end=16, rows=4, cols=2, chosen=False, want_time=True, figsize=(8,12))
-        # beam_map.plot_panel_sats(start=16, end=24, rows=4, cols=2, chosen=False, want_time=True, figsize=(8,12))
-        # beam_map.plot_panel_sats(start=24, end=32, rows=4, cols=2, chosen=False, want_time=True, figsize=(8,12))
-        # beam_map.plot_panel_sats(start=32, end=40, rows=4, cols=2, chosen=False, want_time=True, figsize=(8,12))
-        # beam_map.plot_panel_sats(start=40, end=46, rows=3, cols=2, chosen=False, want_time=True, figsize=(8,12))
+        # beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=True, want_theta=False, figsize=(8,12), rms=False, offset=True, airy_disk=False)
+        beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=False, want_theta=True, figsize=(8,12), rms=False, offset=False, airy_disk=False)
 
-        beam_map.make_plot(show_power=True, shift=True, all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
+        # beam_map.make_plot(show_power=True, all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
+        beam_map.make_healpix_plot(all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")

@@ -19,7 +19,6 @@ class ExtractSBF:
     def __init__(self, data_direcs, masking=True, min_elev=0, process=True, include_elev=True, mask_frequency="1", save_parsed_data_direc="parsed_data"):
         """
         :param data_direc - list of files, directory with receiver raw files
-        TODO finishing this
         """
         assert(type(data_direcs) == list)
         self.masking = masking

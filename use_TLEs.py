@@ -8,10 +8,15 @@ from matplotlib import pyplot as plt
 import cartopy.crs as ccrs
 from urllib import request
 from mpl_toolkits.axes_grid1.inset_locator import zoomed_inset_axes,mark_inset
+import pandas as pd
 
-beam_map_paper_direc = "/Users/sabrinaberger/Desktop/beam_paper/"
+matplotlib.rcParams['mathtext.fontset'] = 'stix'
+matplotlib.rcParams['font.family'] = 'STIXGeneral'
+
+beam_map_paper_direc = "/Users/sabrinaberger/Desktop/beam_paper_plots/"
 
 def plot_sat_directivity(filename, svn_name):
+    # FIGURE 2
     fig, ax = plt.subplots()
     svn = pd.read_csv(filename, skiprows=2, delimiter=",")
     phi_list = np.arange(0, 360, 10)
@@ -185,9 +190,8 @@ if __name__ == "__main__":
     D3A_ALT_deg = 80.5  # This is the elevation of the dish from horizon
     D3A_AZ_deg = 0  # new
 
-    alt, az = get_sat_traj(d, total_minutes, 'GPS BIIR-11 (PRN 19)')
-    import pandas as pd
-    new_times = []
+    # alt, az = get_sat_traj(d, total_minutes, 'GPS BIIR-11 (PRN 19)')
+    # new_times = []
     # for min in minutes:
     #     new_times.append(d + datetime.timedelta(minutes=int(min)))
     # df = pd.DataFrame({'sat_name': 'GPS BIIR-11 (PRN 19)',
@@ -196,21 +200,21 @@ if __name__ == "__main__":
     #                     'az_at_DRAO': az})
     # df.to_csv("locs_prn_new_beam_center.csv")
 
-    for min in minutes:
-        print(min)
-        new_time = d + datetime.timedelta(minutes=int(min))
-        sats = check_sat_in_beam(new_time, D3A_ALT_deg, D3A_AZ_deg)
-        if len(sats) > 0:
-            vis_sats.append(sats)
-            min_sat_vis.append(new_time)
-
-    df = pd.DataFrame({'vis_sats': vis_sats,
-                        'min_sat_vis': min_sat_vis
-                       })
-    df.to_csv("vis_sats_check.csv")
+    # for min in minutes:
+    #     print(min)
+    #     new_time = d + datetime.timedelta(minutes=int(min))
+    #     sats = check_sat_in_beam(new_time, D3A_ALT_deg, D3A_AZ_deg)
+    #     if len(sats) > 0:
+    #         vis_sats.append(sats)
+    #         min_sat_vis.append(new_time)
+    #
+    # df = pd.DataFrame({'vis_sats': vis_sats,
+    #                     'min_sat_vis': min_sat_vis
+    #                    })
+    # df.to_csv("vis_sats_check.csv")
 
     #### Use .gov data to get directivity plot for paper
-
-    # plot_sat_directivity_with_zoom_in("../svn61.csv", "SVN 61")
+    plot_sat_directivity("svn61.csv", "SVN 61")
+    plot_sat_directivity_with_zoom_in("svn61.csv", "SVN 61")
 
 
