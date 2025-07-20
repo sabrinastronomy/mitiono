@@ -36,7 +36,7 @@ def plot_sat_directivity(filename, svn_name):
     ax.text(-20, -30, "Edge of Earth", rotation="vertical")
     ax.text(15, -30, "Edge of Earth", rotation="vertical")
 
-    ax.set_ylabel("Angle from boresight [deg]")
+    ax.set_xlabel("Angle from boresight [deg]")
     ax.set_ylabel("Directivity [dB]")
     ax.set_title(f"GPS Satellite ({svn_name}) Directivity at Emission")
     ax.legend()
@@ -71,7 +71,7 @@ def plot_sat_directivity_with_zoom_in(filename, svn_name):
 
     mark_inset(ax, axins, loc1=1, loc2=3)
 
-    ax.set_ylabel("Angle from boresight [deg]")
+    ax.set_xlabel("Angle from boresight [deg]")
     ax.set_ylabel("Directivity [dB]")
     ax.set_title(f"GPS Satellite ({svn_name}) Directivity at Emission")
     ax.legend()

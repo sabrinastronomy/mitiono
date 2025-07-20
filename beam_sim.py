@@ -6,16 +6,17 @@ beam = UVBeam()
 
 beam.read_beamfits('/Users/sabrinaberger/mitiono/new_beam_data_2024/beam.fits', use_future_array_shapes=True)
 power_beam = beam.efield_to_power(inplace=False)
-print(beam.axis1_array)
+print(beam.freq_array)
 # plt.plot(beam.data_array[0, 0, -1, :, 0])
 # plt.plot(beam.data_array[0, 0, -1, :, 0])
-plt.semilogy(beam.axis2_array * 180 / np.pi,  power_beam.data_array[0, 0, 20, :, 0])
-# plt.semilogy(-power_beam.axis2_array * 180 / np.pi,  power_beam.data_array[0, 0, -1, :, 0])
-
+plt.semilogy(power_beam.axis2_array * 180 / np.pi,  power_beam.data_array[0, 0, 20, :, 0])
+plt.semilogy(-power_beam.axis2_array * 180 / np.pi,  power_beam.data_array[0, 0, 20, :, 0])
+plt.xlabel("theta (degrees)")
+plt.ylabel("")
 # plt.plot(beam.axis1_array, power_beam[0, 0, -1, :, 0])
 # plt.plot(-beam.axis1_array, power_beam[0, 0, -1, :, 0])
 
-plt.show()
+plt.savefig("beam_sim.png", dpi=150)
 # the first dimension (of size 2) is the E-field vector components (phi and theta or theta and phi, I can never remember the order)
 # the second dimension (of size 2) is the feed polarization, x and y, where x is aligned with East-West, and y will be identical, only rotated 90 degrees.
 # the third dimension (of size 49) is the frequency dimension. You can see the frequency array (in Hz) with beam.freq_array

@@ -15,6 +15,7 @@ from scipy.stats import binned_statistic_2d
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
 import scipy
+import os
 matplotlib.rcParams['mathtext.fontset'] = 'stix'
 matplotlib.rcParams['font.family'] = 'STIXGeneral'
 
@@ -50,7 +51,7 @@ class GetBeamMap(ExtractSBF):
         self.all_sat_dict = dict
         self.get_close_sats()
 
-    def get_close_sats(self, tol_beam=20):
+    def get_close_sats(self, tol_beam=1):
         self.close_sat_beams = []
 
         min_diff_az = 100
@@ -76,8 +77,25 @@ class GetBeamMap(ExtractSBF):
                 #     min_diff_el = min(diff_elev)
                 #     min_nam = key
                 # Checking if current satellite passes close to center of beam
-                if (diff_az < tol_beam).any() and (diff_elev < tol_beam).any():
+                # if (diff_az < tol_beam).any() and (diff_elev < tol_beam).any():
+                if ((diff_az < tol_beam) & (diff_elev < tol_beam)).any():
+
                     print(f"{key} passes close to center of beam.")
+                    print(np.min(diff_az))
+                    print(np.min(diff_elev))
+
+                    min_index = np.argmin(diff_az)
+                    corresponding_elev = diff_elev[min_index]
+
+                    print("Minimum azimuth:", diff_az[min_index])
+                    print("Corresponding elevation:", corresponding_elev)
+
+                    min_index = np.argmin(diff_elev)
+                    corresponding_az = diff_az[min_index]
+
+                    print("Minimum elevation:", diff_elev[min_index])
+                    print("Corresponding azimuth:", corresponding_az)
+
                     # min_diff_az = min(diff_az)
                     # min_diff_el = min(diff_elev)
                     # print(f"min diff az: {min_diff_az}")
@@ -124,7 +142,6 @@ class GetBeamMap(ExtractSBF):
             powers_arr.append(cnos_matched)
             alt_arr.append(elevs_matched)
             az_arr.append(az_matched)
-            times_elevs
 
         # flattening ragged numpy arrays
         powers_arr = np.concatenate(powers_arr)
@@ -168,7 +185,7 @@ class GetBeamMap(ExtractSBF):
         # Show the plot
         plt.savefig(self.plot_dir + "healpy.png", dpi=300)
 
-    def make_plot(self, all_sat, plot_title, sat_list=[], show_power=False, filename="all_sat.png"):
+    def make_plot_full_tracks(self, all_sat, plot_title, sat_list=[], show_power=False, filename="all_sat.png"):
         """
         Plot all the satellites or a subset
         param: all_sat - boolean when true all satellites are plotted, when false, looks for satellite in sat_list
@@ -209,7 +226,7 @@ class GetBeamMap(ExtractSBF):
                 alt_arr.append(elevs_matched)
                 az_arr.append(az_matched)
             else: # just plotting tracks in black
-                ax.scatter(np.deg2rad(az), 90 - elevs, s=0.01, c="k")
+                ax.scatter(np.deg2rad(az), np.deg2rad(elevs) / (np.pi/4), s=0.01, c="k")
                 print(np.deg2rad(az[:2]), elevs[:2])
 
         if show_power:
@@ -217,11 +234,11 @@ class GetBeamMap(ExtractSBF):
             powers_arr = np.concatenate(powers_arr)
             alt_arr = np.concatenate(alt_arr)
             # shifting elevs
-            alt_arr = 90 - alt_arr
+            alt_arr = alt_arr
             az_arr = np.concatenate(az_arr)
             # 2D binning getting maximums, using ChatGPT to help accelerate generating this plot
             # Step 1: Define bin edges for azimuth and altitude (in degrees)
-            alt_bins = np.linspace(70, 90, int(100))  # Altitude bins (0 to 90 degrees), binwidth = 0.1 deg
+            alt_bins = np.linspace(0, 90, int(100))  # Altitude bins (0 to 90 degrees), binwidth = 0.1 deg
             az_bins = np.linspace(0, 360, int(100))  # Azimuth bins (-180 to 180 degrees), binwidth = 0.1 deg
 
             # Step 2: Perform 2D binning using the average of `powers_arr` for each bin
@@ -233,18 +250,20 @@ class GetBeamMap(ExtractSBF):
             az_centers = (az_edges[:-1] + az_edges[1:]) / 2  # Convert azimuth edges to bin centers
             alt_centers = (alt_edges[:-1] + alt_edges[1:]) / 2  # Convert altitude edges to bin centers
 
+
             # Step 4: Convert azimuth and altitude to radians for polar plotting
-            azimuth_bin_centers, altitude_bin_centers = np.meshgrid(np.radians(az_centers), alt_centers)
+            azimuth_bin_centers, altitude_bin_centers = np.meshgrid(np.radians(az_centers), np.radians(alt_centers))
 
             # Step 5: Create the polar plot with pcolormesh
             # pcolormesh using binned azimuth and altitude
-            c = ax.pcolormesh(azimuth_bin_centers, altitude_bin_centers, peaks.T[:-1, :-1], cmap='viridis', shading="flat")
+            r_bin_centers = altitude_bin_centers /(np.pi/2)
+            c = ax.pcolormesh(azimuth_bin_centers, r_bin_centers, peaks.T[:-1, :-1], cmap='viridis', shading="flat")
             cbar = fig.colorbar(c, ax=ax)
             cbar.set_label(r'$C/N_0$ [db-Hz]', rotation=270, labelpad=15)
 
 
         # Define the center of the circle
-        r_center = np.radians(90 - D3A_ALT_deg)  # altitude (radius)
+        r_center = np.radians(D3A_ALT_deg)  # altitude (radius)
         theta_center = np.radians(D3A_AZ_deg)  # azimuth (angle in radians, converted from degrees)
 
         # Convert polar coordinates (r_center, theta_center) to Cartesian coordinates
@@ -255,19 +274,17 @@ class GetBeamMap(ExtractSBF):
         circle_radius = 100*1.22 * 0.2 / 6
 
         # Create the circle in Cartesian coordinates
-        circle = plt.Circle((x_center, y_center), circle_radius, fill=False, color='black',
-                            transform=ax.transData._b, linewidth=1)
+        # circle = plt.Circle((x_center, y_center), circle_radius, fill=False, color='black',
+        #                     transform=ax.transData._b, linewidth=1)
         # Add the circle to the plot
-        ax.add_artist(circle)
+        # ax.add_artist(circle)
+        # Format plot
+        ax.set_theta_zero_location('N')  # 0° azimuth at top
+        ax.set_theta_direction(-1)  # Clockwise
 
-        ax.set_theta_zero_location('E')
-        ax.set_title(plot_title)
-        # convert circle_radius to polar plot limits
-        ax.set_yticks(range(0, 90 + 10, 10))  # Define the yticks
-        yLabel = ['90', '80', '70', '', '', '', '', '', '', '']
-        ax.set_ylim(70, 90)  # This would make the center at 90 degrees
+        ax.set_rticks([0, np.pi / 4, np.pi / 2, 3 * np.pi / 4, np.pi])
+        ax.set_yticklabels(['0°', '45°', '90°', '135°', '180°'])
 
-        ax.set_yticklabels(yLabel)
         plt.savefig(self.plot_dir + filename, bbox_inches='tight', dpi=300)
         plt.close()
 
@@ -279,20 +296,17 @@ class GetBeamMap(ExtractSBF):
         az_deg = np.asarray([-(360 - x) if x > 180 else x for x in az_deg])
         return az_deg
 
+    def unshift_az(self, az_shifted):
+        """
+        Inverts the shift applied by shift_az:
+        Converts azimuth from [-180, 180] back to [0, 360] degrees.
 
-    def save_particular_sat(self, sat_name):
-        satellite = self.all_sat_dict[sat_name]
-        elevs = satellite["elevations"][0]
-        az = satellite["azimuths"][0]
-        cnos = satellite["cno"][0]
-        times_cno = satellite["times"][0]
-        times_elevs = satellite["elev_time"][0]
-        times_elevs, cnos, elevs_deg, az_deg = self.match_elevs(times_cno, times_elevs, cnos, elevs, az)
-
-        np.save(f"{sat_name}_times.npy", times_elevs)
-        np.save(f"{sat_name}_cnos.npy", cnos)
-        np.save(f"{sat_name}_elev.npy", elevs_deg)
-        np.save(f"{sat_name}_az.npy", az_deg)
+        :param az_shifted: shifted azimuth in degrees (range: -180 to 180)
+        :return: azimuth in degrees (range: 0 to 360)
+        """
+        az_shifted = np.asarray(az_shifted)
+        az_deg = (az_shifted + 360) % 360
+        return az_deg
 
     def mask_array_for_one_d(self, az, elevs, cnos, mask, times):
         """angles in radians"""
@@ -303,6 +317,61 @@ class GetBeamMap(ExtractSBF):
         angles_rad = self.convert_angular_distance_from_center_beam(elevs, az)
         angles_deg = angles_rad * 180 / np.pi
         return angles_deg, cnos, times
+
+    def save_satellite_arrays(self, sat_name, output_dir="."):
+        """
+        Saves and returns elevation, azimuth, CNO, and timestamps for a given satellite.
+
+        Parameters:
+            sat_name (str): Name of the satellite (e.g., 'G03')
+            output_dir (str): Directory to save the .npy files (default: current directory)
+
+        Returns:
+            dict: Dictionary containing all saved arrays (raw and matched)
+        """
+
+        satellite = self.all_sat_dict[sat_name]
+
+        elevs = satellite["elevations"][0]
+        az = satellite["azimuths"][0]
+        all_cnos = satellite["cno"][0]
+        times_cno = satellite["times"][0]
+        times_elevs = satellite["elev_time"][0]
+
+        # Save raw arrays
+        np.save(os.path.join(output_dir, f"elevs_{sat_name}.npy"), np.array(elevs))
+        np.save(os.path.join(output_dir, f"az_{sat_name}.npy"), np.array(az))
+        np.save(os.path.join(output_dir, f"cno_{sat_name}.npy"), np.array(all_cnos))
+        np.save(os.path.join(output_dir, f"times_cno_{sat_name}.npy"), np.array(times_cno))
+        np.save(os.path.join(output_dir, f"times_elevs_{sat_name}.npy"), np.array(times_elevs))
+
+        # Get matched arrays
+        times_elevs_matched, cnos_matched, elevs_deg, az_deg = self.match_elevs(
+            times_cno, times_elevs, all_cnos, elevs, az
+        )
+
+        # Save matched arrays
+        np.save(os.path.join(output_dir, f"matched_{sat_name}_cnos.npy"), cnos_matched)
+        np.save(os.path.join(output_dir, f"matched_{sat_name}_elev.npy"), elevs_deg)
+        np.save(os.path.join(output_dir, f"matched_{sat_name}_az.npy"), az_deg)
+        np.save(os.path.join(output_dir, f"matched_{sat_name}_times_elevs.npy"), times_elevs_matched)
+
+        # Return everything as a dictionary
+        return {
+            "raw": {
+                "elevs": elevs,
+                "az": az,
+                "cnos": all_cnos,
+                "times_cno": times_cno,
+                "times_elevs": times_elevs
+            },
+            "matched": {
+                "times_elevs": times_elevs_matched,
+                "cnos": cnos_matched,
+                "elevs_deg": elevs_deg,
+                "az_deg": az_deg
+            }
+        }
 
     def get_angles_for_one_d_prof(self, sat_name, shift=True):
         """
@@ -444,18 +513,18 @@ class GetBeamMap(ExtractSBF):
             c_n_angle_all.append(c_n_curr_angle) # saving all C_Ns
 
             c_n_curr_angle = [item for sublist in c_n_curr_angle for item in sublist] # flattening ragged list
-            c_n_angle_min[i] = np.min(c_n_curr_angle) # getting min
-            c_n_angle_max[i] = np.max(c_n_curr_angle) # getting max
-            c_n_angle[i] = np.mean(c_n_curr_angle) # mean of c_n_angle in logspace
-            std_angle[i] = np.std(c_n_curr_angle) # weird std of c_n_angle in logspace
+            c_n_angle_min[i] = np.nanmin(c_n_curr_angle) # getting min
+            c_n_angle_max[i] = np.nanmax(c_n_curr_angle) # getting max
+            c_n_angle[i] = np.nanmean(c_n_curr_angle) # mean of c_n_angle in logspace
+            std_angle[i] = np.nanstd(c_n_curr_angle) # weird std of c_n_angle in logspace
 
             ## average linear SNR
             s_n_curr_angle = self.convert_C_n_to_SNR_linear(c_n_curr_angle) # convert from C_n to linear SNR
-            mean_s_n_curr_angle = np.mean(s_n_curr_angle) # take mean of SNR
+            mean_s_n_curr_angle = np.nanmean(s_n_curr_angle) # take mean of SNR
             snr_angle[i] = mean_s_n_curr_angle # mean of SNR in linear space
 
             ## linear SNR standard deviation
-            s_n_curr_angle_std = np.std(s_n_curr_angle)
+            s_n_curr_angle_std = np.nanstd(s_n_curr_angle)
             if s_n_curr_angle_std == 0:
                 s_n_curr_angle_std = 1
             s_n_curr_angle_std = 10 * np.log10(s_n_curr_angle_std) # convert back into db
@@ -468,7 +537,7 @@ class GetBeamMap(ExtractSBF):
         is_sorted = lambda arr: np.all(arr[:-1] <= arr[1:])
         assert is_sorted(times) # ensuring time is sorted so chunking works
 
-        gap_threshold = np.max(diff_times) * 0.7  # threshold for splitting chunks at 90% maximum
+        gap_threshold = np.max(diff_times) * 0.7  # threshold for splitting chunks at 70% maximum
 
         chunk_indices = np.where(diff_times > gap_threshold)[0] + 1
         print("CHECK OUTPLOT PLOTS TO MAKE SURE CHUNKING IS HAPPENING CORRECTLY")
@@ -476,15 +545,15 @@ class GetBeamMap(ExtractSBF):
         theta_chunks = np.split(thetas, chunk_indices)
         power_chunks = np.split(powers, chunk_indices)
 
-        if sat_name == "E15": # just keeping chunks but saving by eye from plots
-            time_chunks = [time_chunks[1]]
-            theta_chunks = [theta_chunks[1]]
-            power_chunks = [power_chunks[1]]
-
-        if sat_name == "E36": # just keeping chunks but saving by eye from plots
-            time_chunks = [time_chunks[1]]
-            theta_chunks = [theta_chunks[1]]
-            power_chunks = [power_chunks[1]]
+        # if sat_name == "E15": # just keeping chunks but saving by eye from plots
+        #     time_chunks = [time_chunks[1]]
+        #     theta_chunks = [theta_chunks[1]]
+        #     power_chunks = [power_chunks[1]]
+        #
+        # if sat_name == "E36": # just keeping chunks but saving by eye from plots
+        #     time_chunks = [time_chunks[1]]
+        #     theta_chunks = [theta_chunks[1]]
+        #     power_chunks = [power_chunks[1]]
 
         # Plot each chunk with a different color
         plt.close()
@@ -502,7 +571,7 @@ class GetBeamMap(ExtractSBF):
         plt.title('Color-Coded Chunks of Data')
         plt.legend()
         plt.savefig(f"chunks/{sat_name}_chunking.png")
-
+        plt.close()
         return time_chunks, power_chunks, theta_chunks
 
 
@@ -536,7 +605,7 @@ class GetBeamMap(ExtractSBF):
                 else:
                     decimals_round = 1
                 unique_angles_deg, avg_powers, all_powers, avg_sigmas, snr_angle, std_from_linear, counts, power_angle_max, power_angle_min = (
-                    self.average_C_N_0(powers_grouped, angles_grouped, decimals_round=decimals_round, min_passes_for_average=2))
+                    self.average_C_N_0(powers_grouped, angles_grouped, decimals_round=1, min_passes_for_average=2))
                 cmap = cm.get_cmap("viridis", 6)  # Specify 6 distinct colors
                 colors = [cmap(i) for i in range(6)]  # Extract colors for each pass
                 if want_theta:
@@ -741,31 +810,77 @@ class GetBeamMap(ExtractSBF):
         plt.xlim(0, 25000)
         plt.savefig(self.plot_dir + "overplotted_offset.png")
 
-    def plot_one_d_prof(self, sat_names, with_sim=False):
+    @staticmethod
+    def compute_edges(x):
+        dx = np.diff(x) / 2
+        # make edges below
+        return np.concatenate([
+            [x[0] - dx[0]],
+            x[:-1] + dx,
+            [x[-1] + dx[-1]]
+        ])
+
+    def plot_one_d_prof(self, sat_names, with_sim=True, smaller_x_axis=False):
         """
         Plots 1D beam profile in time and angle
         """
-        fig, axes = plt.subplots()
+        plt.close()
 
         for sat_name in sat_names:
-            split_all_times, split_all_powers, split_all_angles_deg, all_times, all_powers, all_angles_deg = self.get_angles_for_one_d_prof(sat_name, shift=False)
-            axes.scatter(all_angles_deg, all_powers, s=0.5, label=sat_name, c="k")
 
-            plt.xlim(-90, 90)
-            # plt.close()
-            # cnos = satellite["cno"][0]
-            # satellite = self.all_sat_dict[sat_name]
-            # times_cno = satellite["times"][0]
-            # plt.scatter(times_cno, cnos, c="k", s=0.1)
-            # plt.xlabel(r"${\rm Time ~ [s]}$")
-            # plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
-            # plt.title(sat_name)
-            # plt.savefig(self.plot_dir + sat_name + "_time_indiv.png", bbox_inches='tight')
-        plt.xlabel(r"${\theta \rm ~ [deg]}$")
-        plt.ylabel(r'${C/N_0 \rm ~ [dB-Hz]}$')
-        plt.legend()
-        plt.title(sat_name[:3])
-        plt.savefig(self.plot_dir + sat_name + "_power_indiv_new.png", bbox_inches='tight', dpi=300)
+            split_all_times, split_all_powers, split_all_angles_deg, all_times, all_powers, all_angles_deg = self.get_angles_for_one_d_prof(sat_name, shift=True)
+            unique_angles_deg, avg_powers, all_powers, avg_sigmas, snr_angle, std_from_linear, counts, power_angle_max, power_angle_min = (
+                self.average_C_N_0(split_all_powers, split_all_angles_deg, decimals_round=1,
+                                   min_passes_for_average=2))
+            if with_sim:
+                from pyuvdata import UVBeam
+                beam = UVBeam()
+                beam.read_beamfits('/Users/sabrinaberger/Current Research Local/mitiono/new_beam_data_2024/beam.fits',
+                                   use_future_array_shapes=True)
+                power_beam = beam.efield_to_power(inplace=False)
+                power_beam.peak_normalize()
+                sim_beam_angles = power_beam.axis2_array * 180 / np.pi
+                within_range = (sim_beam_angles >= -7) & (sim_beam_angles <= 7)
+
+                # first_null_power_range = power_beam[within_range]
+                # first_null_power_value = np.min(first_null_power_range)
+                print("beam frequencies")
+                print(beam.freq_array[20])
+                beam_power = power_beam.data_array[0, 0, 20, :, -1]
+                plt.semilogy(sim_beam_angles, beam_power)
+                plt.semilogy(-sim_beam_angles, beam_power, label="sim")
+
+
+
+            # print("plotting scatter plot")
+            BW = 0.5e6
+            BW_factor = 10*np.log10(BW)
+            print(f"BW_factor, {BW_factor}")
+            avg_powers -= BW_factor # assuming 2 MHz bandwidth for L1, convert from db-Hz to dB, 10*log(2e6)
+            s_n_linear = self.convert_C_n_to_SNR_linear(avg_powers, bw=BW)
+            s_n_linear_normalized = s_n_linear / np.nanmax(s_n_linear)
+            c_n_normalized = self.convert_SNR_linear_C_n(s_n_linear_normalized, bw=BW)
+            # scaling_constant = np.nanmax(avg_powers) - np.max(beam_power)
+
+            # np.save("deg.npy", unique_angles_deg)
+            np.save(f"pow_{sat_name}.npy", np.asarray(split_all_powers, dtype=object), allow_pickle=True)
+            np.save(f"deg_{sat_name}.npy", np.asarray(split_all_angles_deg, dtype=object), allow_pickle=True)
+            np.save(f"deg_{sat_name}.npy", np.asarray(split_all_angles_deg, dtype=object), allow_pickle=True)
+            np.save(f"deg_{sat_name}.npy", np.asarray(split_all_angles_deg, dtype=object), allow_pickle=True)
+
+            # avg_powers_scaled = avg_powers - scaling_constant # scaling powers
+            plt.semilogy(unique_angles_deg, s_n_linear_normalized, label=sat_name, c="k", linestyle='none', marker='o', markersize=0.5)
+            plt.legend()
+            if smaller_x_axis:
+                plt.xlim(-10, 10)
+                sat_name = "smaller_x_axis_" + sat_name
+            plt.xlabel(r"${\theta \rm ~ [deg]}$")
+            plt.ylabel(r'${power \rm ~ [raw]}$')
+            # plt.legend()
+            # plt.title(sat_name[:3])
+            plt.savefig(sat_name + "_power_indiv_new.png", bbox_inches='tight', dpi=300)
+            # plt.savefig(self.plot_dir + sat_name + "_power_indiv_new.png", bbox_inches='tight', dpi=300)
+            plt.close()
 
     @staticmethod
     def get_bessel_0(ka_sintheta):
@@ -775,21 +890,38 @@ class GetBeamMap(ExtractSBF):
     def get_bessel_1(ka_sintheta):
         return special.j1(ka_sintheta)
 
+    # @staticmethod
+    # def convert_angular_distance_from_center_beam(alt, az):
+    #     """
+    #     Finds the angular distance from the beam center for a given alt and az using the dot product (lazy trig).
+    #     """
+    #     x_beam = np.cos(D3A_AZ) * np.cos(D3A_ALT)
+    #     y_beam = np.sin(D3A_AZ) * np.cos(D3A_ALT)
+    #     z_beam = np.sin(D3A_ALT)
+    #
+    #     x_sat = np.cos(az) * np.cos(alt)
+    #     y_sat = np.sin(az) * np.cos(alt)
+    #     z_sat = np.sin(alt)
+    #
+    #     cos_ang = x_beam*x_sat + y_beam*y_sat + z_beam*z_sat
+    #     ang = np.arccos(cos_ang)
+    #     return ang
+
     @staticmethod
     def convert_angular_distance_from_center_beam(alt, az):
         """
-        Finds the angular distance from the beam center for a given alt and az using the dot product (lazy trig).
+        Computes angular distance from beam center using a stable atan2-based formula.
+        Assumes inputs are in radians.
         """
-        x_beam = np.cos(D3A_AZ) * np.cos(D3A_ALT)
-        y_beam = np.sin(D3A_AZ) * np.cos(D3A_ALT)
-        z_beam = np.sin(D3A_ALT)
+        delta_az = az - D3A_AZ
 
-        x_sat = np.cos(az) * np.cos(alt)
-        y_sat = np.sin(az) * np.cos(alt)
-        z_sat = np.sin(alt)
+        num = np.sqrt(
+            (np.cos(alt) * np.sin(delta_az)) ** 2 +
+            (np.cos(D3A_ALT) * np.sin(alt) - np.sin(D3A_ALT) * np.cos(alt) * np.cos(delta_az)) ** 2
+        )
+        den = np.sin(D3A_ALT) * np.sin(alt) + np.cos(D3A_ALT) * np.cos(alt) * np.cos(delta_az)
 
-        cos_ang = x_beam*x_sat + y_beam*y_sat + z_beam*z_sat
-        ang = np.arccos(cos_ang)
+        ang = np.arctan2(num, den)
         return ang
 
     @staticmethod
@@ -856,14 +988,19 @@ if __name__ == "__main__":
 
         beam_map = GetBeamMap(data_direcs=[])
         beam_map.replace_dictionary(sat_dict)
-        # beam_map.plot_one_d_prof(["G14"])
-        # beam_map.plot_panel_sats(start=len(beam_map.close_sat_beams)-19, end=len(beam_map.close_sat_beams), chosen=False)
+        # beam_map.plot_one_d_prof(["E15"], smaller_x_axis=False)
+        # beam_map.plot_one_d_prof(["R03"], smaller_x_axis=False)
+        # beam_map.plot_one_d_prof(["G10"], smaller_x_axis=False)
+        #
 
         good_sats = ["G04", "G07", "G10", "G23", "G29", "G30", "E36", "E15"]
-        beam_map.chosen_list = good_sats
+        # beam_map.make_plot(show_power=True, all_sat=True, sat_list=[], plot_title="", filename=f"best_sats.png")
+        # for sat in good_sats:
+        #     beam_map.save_satellite_arrays(sat, output_dir="/best_sats")
+        # beam_map.chosen_list = good_sats
 
         # beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=True, want_theta=False, figsize=(8,12), rms=False, offset=True, airy_disk=False)
-        beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=False, want_theta=True, figsize=(8,12), rms=False, offset=False, airy_disk=False)
+        # beam_map.plot_panel_sats(start=0, end=8, rows=4, cols=2, chosen=True, want_time=False, want_theta=True, figsize=(8,12), rms=False, offset=False, airy_disk=False)
 
-        # beam_map.make_plot(show_power=True, all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
-        beam_map.make_healpix_plot(all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
+        beam_map.make_plot_full_tracks(show_power=True, all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
+        # beam_map.make_healpix_plot(all_sat=True, plot_title=r"${\rm Approx. 72 ~ hours ~ of ~ GNSS ~ satellite ~ tracks ~ at ~ D3A}$", filename=f"{day}_all_sat.png")
